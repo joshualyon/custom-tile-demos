@@ -120,3 +120,34 @@
   .main-content #content img {
     max-width: 80%; /* OPTIONAL scale any inner images if they're too big */
   }
+  
+  /* OPTIONAL APPROACH FOR KNOWN CONTENT FORMATS
+     (Uncomment below CSS to use)
+  
+     Another vertical auto-scale approach 
+     where the expected inner content from 
+     the attribute is known.
+  
+     Makes the 'content' holder flex so 
+     we can center and forces the content 
+     into a column.
+
+     Then restricts the to a maximum height
+     and hides the br since it shouldn't
+     display in flex layout.
+  */
+  /*
+  #content { 
+    display: flex; 
+    flex-direction: column;
+    height: 100%; 
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+  }
+  #content img {
+    max-height: 70%; 
+  }
+  #content br { display: none; }
+  */
+</style>

@@ -1,0 +1,122 @@
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
+<script src="//cdn.sharptools.io/js/custom-tiles.js"></script>
+<div class="main-content">
+  <span id="content">Loading...</span>
+</div>
+<script>
+  //stub a variable to hold the settings at a higher scope
+  // var settings; //apiSample, deviceId, attribute
+  var tileSettings = { 
+    apiSample: "https://cloud.hubitat.com/api/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX/apps/999/devices?access_token=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", 
+    deviceId: "99",
+    attribute: "visualWithText"
+  }
+  var apiSettings = {};
+  var timerId;
+  var REFRESH_INTERVAL = 60 * 60 * 1000; //every 60 minutes?
+  // var REFRESH_INTERVAL = 5 * 1000; //5 seconds
+  //get the content element so we can update it later
+  var contentEl = document.getElementById("content");
+  //when the tile is ready
+  stio.ready(function(data){
+    //get the settings from the callback
+    // tileSettings = data.settings; //token, deviceId, attribute
+    //and initialize the tile
+    init();
+  });
+
+  function init(){
+    //parse the relevant settings out of the apiSample
+    parseApiSample();
+    //make a call to the Hubitat API to get some data
+    refresh().then(function(){
+      //if the first refresh is successful, schedule the periodic refreshes
+      timerId = setInterval(refresh, REFRESH_INTERVAL);
+    });
+  }
+
+  //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
+  function showError(message){
+    console.error(message);
+    stio.showToast(message, "red");
+    contentEl.innerText = "Error";
+  }
+
+  //parse out the various components from a provided Maker API URL
+  function parseApiSample(sampleUrl){
+    //if we weren't passed in an explicit URL to parse
+    if(sampleUrl == null){
+      //then try to use the sample API URL from the tile settings
+      sampleUrl = tileSettings.apiSample;
+    }
+    //if no URL was provided, let the user know
+    if(sampleUrl == null || sampleUrl === "") showError("No API URL was provided. Please configure the tile.");
+    //if the api isn't the cloud API, let the user know
+    if(sampleUrl.indexOf("cloud.hubitat.com") < 0) showError("Please use the Hubitat Maker API CLOUD URI.")
+
+    //try to parse out the various parts of the URL we need with a regular expression
+    var re = /https:\/\/cloud\.hubitat\.com\/api\/([^\/]+)\/apps\/([\d]+)\/[^\?]+\?access_token\=([^\&]+)/;
+    var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: hub id, 2: app id, 3: token)
+
+    //pass the parsed settings back into the top-level variable
+    apiSettings = { 
+      "hubId": match[1], 
+      "appId": match[2], 
+      "token": match[3]
+    };
+  }
+
+  //helper function to format the parsed data back into a base URI
+  function getBaseUrl(){
+    return `https://cloud.hubitat.com/api/${apiSettings.hubId}/apps/${apiSettings.appId}`
+  }
+  //helper function to format the token into an axios 'data' object to attach the token as a parameter
+  function getAxiosConfig(){
+    return {params: {access_token: apiSettings.token}};
+  }
+
+  function refresh(){
+    return getThing().then(function(thing){
+      console.log('got thing', thing);
+      //try to find the desired parameter
+        let attribute = thing.attributes.find(function(attr){ return attr.name === tileSettings.attribute});
+        //if we didn't get the attribute, bail out
+        if(attribute == null) return showError("Could not find desired attribute");
+      console.log('got attribute', attribute);
+      //otherwise inject the attribute value as HTML
+        contentEl.innerHTML = attribute.currentValue
+    }).catch(function(error){
+      showError(error.message);
+    });
+  }
+
+  function getThing(){
+    let url = getBaseUrl() + `/devices/${tileSettings.deviceId}`
+    let config = getAxiosConfig();
+    //make the API call
+    return axios.get(url, config).then(function(response){
+      //if we got a response with the expected base data
+      if(response.data && response.data.attributes){
+        //return the response
+        return response.data; //TODO: we could parse it into a more helpful "Thing" object format
+      }
+    }).catch(function(error){
+      showError("Error communicating with Maker API")
+    })
+  }
+</script>
+
+<style>
+  html,body {height: 100%;margin:0;}
+  .main-content {
+    display: flex;
+    height:100%;
+    align-items: center;
+    justify-content: center;
+  }
+  .main-content #content {
+    text-align: center; /* OPTIONAL center align any text that gets injected */
+  }
+  .main-content #content img {
+    max-width: 80%; /* OPTIONAL scale any inner images if they're too big */
+  }

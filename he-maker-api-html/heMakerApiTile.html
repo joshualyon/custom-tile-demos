@@ -1,26 +1,39 @@
+<!-- Do not edit immediately below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.1.0",
+  "settings": [
+    {"name": "apiSample", "label": "Sample API URL", "type": "STRING"},
+    {"name": "deviceId", "label": "Device ID", "type": "STRING"},
+    {"name": "attribute", "label": "Attribute", "type": "STRING"}
+  ],
+  "name": "Hubitat Maker API"
+}
+</script>
+<!-- Do not edit above -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
 <script src="//cdn.sharptools.io/js/custom-tiles.js"></script>
 <div class="main-content">
-  <span id="content">Loading...</span>
+  <span id="content"><span data-index="0">Loading...</span></span>
 </div>
 <script>
   //stub a variable to hold the settings at a higher scope
-  // var settings; //apiSample, deviceId, attribute
   var tileSettings = { 
-    apiSample: "https://cloud.hubitat.com/api/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX/apps/999/devices?access_token=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", 
-    deviceId: "99",
-    attribute: "visualWithText"
+    // apiSample: "https://cloud.hubitat.com/api/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX/apps/999/devices?access_token=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", 
+    // deviceId: "67",
+    // attribute: "visualWithText"
   }
   var apiSettings = {};
   var timerId;
   var REFRESH_INTERVAL = 60 * 60 * 1000; //every 60 minutes?
-  // var REFRESH_INTERVAL = 5 * 1000; //5 seconds
+  var ELEMENT_SWAP_INTERVAL = 500; //give 500 milliseconds for images in new HTML to render
+  
   //get the content element so we can update it later
   var contentEl = document.getElementById("content");
   //when the tile is ready
   stio.ready(function(data){
     //get the settings from the callback
-    // tileSettings = data.settings; //token, deviceId, attribute
+    tileSettings = data.settings; //apiSample, deviceId, attribute
     //and initialize the tile
     init();
   });
@@ -77,17 +90,37 @@
 
   function refresh(){
     return getThing().then(function(thing){
-      console.log('got thing', thing);
       //try to find the desired parameter
-        let attribute = thing.attributes.find(function(attr){ return attr.name === tileSettings.attribute});
-        //if we didn't get the attribute, bail out
-        if(attribute == null) return showError("Could not find desired attribute");
-      console.log('got attribute', attribute);
+      let attribute = thing.attributes.find(function(attr){ return attr.name === tileSettings.attribute});
+      //if we didn't get the attribute, bail out
+      if(attribute == null) return showError("Could not find desired attribute");
+      
       //otherwise inject the attribute value as HTML
-        contentEl.innerHTML = attribute.currentValue
+      // updateHTML(attribute.currentValue); //this approach appends a hidden node, waits a moment, then 
+      contentEl.innerHTML = attribute.currentValue //this approach just replaces the HTML which is more efficient, but can result in image flicker
     }).catch(function(error){
       showError(error.message);
     });
+  }
+
+  function updateHTML(html){
+    //find the OLD child node
+    var oldEl = contentEl.firstChild; //alternatively we could tag the Node and try to find it
+    //create a NEW child node
+    var newEl = document.createElement("span");
+    newEl.innerHTML = html; //with our desired HTML
+    newEl.style.display = "none"; //and style it as hidden
+    contentEl.appendChild(newEl); //and then append it
+    
+    //wait a moment
+    setTimeout(function(){
+      //show the NEW child node  
+      newEl.style.removeProperty("display");
+      //hide the OLD child node
+      oldEl.style.display = "none";
+      oldEl.remove(); //remove itself
+    }, ELEMENT_SWAP_INTERVAL);
+    
   }
 
   function getThing(){

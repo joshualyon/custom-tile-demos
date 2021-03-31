@@ -12,7 +12,7 @@ items within the context of the Custom Tile.
 This tile requires some basic setup on your Hubitat Hub as it uses the Maker API to reading data.
 
 1. Open the Apps page on your Hubitat hub and add a built-in app called Maker API
-2. Configure the Maker API with your desired devices and add `https://api.sharptools.io` to the CORS field  
+2. Configure the Maker API with your desired devices and add `https://run.sharptools.app` to the CORS field  
   **NOTE**: We plan on changing this base domain before production release of Custom Tiles to prevent domain escalation, so it will need to get updated at some point
 3. Copy and paste any of the example URLs into the `apiSample` setting
 4. Update the `deviceId` and `attribute` settings with your desired configuration

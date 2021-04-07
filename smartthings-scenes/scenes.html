@@ -1,0 +1,104 @@
+<!-- 
+  README
+  Create a SmartThings 'Personal Access Token' with access to Scenes and use it
+  for the 'token' setting in the tile.
+
+  https://account.smartthings.com/tokens
+
+  Documentation: 
+  https://github.com/joshualyon/custom-tile-demos/tree/main/smartthings-scenes/
+-->
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.1.0",
+  "settings": [{"label": "Token", "type": "STRING", "name": "token"}],
+  "name": "SmartThings Scenes",
+  "dimensions": {"height": 3, "width": 3}
+}
+</script>
+<!-- Do not edit above -->
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js">
+</script>
+<div class="main-content" id="mainContent">Initializing...</div>
+
+<style>
+  html, body { margin: 0; height:100%; }
+  .main-content { 
+     width: 100%; height: 100%; 
+     padding: 0; margin: 0; 
+     display: flex; 
+     align-items: center; justify-content: center; 
+     text-align: center;
+     font-size: min(20vh, 20vw); 
+   }
+</style>
+<script>
+var content = document.getElementById("mainContent");
+var patToken = null;
+var scenes = [];
+var baseUrl = "https://api.smartthings.com/v1/scenes";
+
+content.onclick = onClick; //setup the click handler
+
+function getAxiosConfig(){
+  return { "headers": { "Authorization": "Bearer " + patToken } }
+}
+
+stio.ready((data)=>{
+   console.log("stio library is ready with token", data.settings.token);
+   if(data.settings.token == null){
+      content.innerText = "Please configure the tile";
+      return;
+   }
+   else{
+      patToken = data.settings.token;
+   }
+   
+   content.innerText = "Loading...";
+   getScenes();
+});
+
+function onClick(){
+   if(scenes.length === 1){
+     //execute the one scene we have
+     executeScene(scenes[0].sceneId);
+   }
+   else{
+      var list = {title: "Scenes", items: []};
+      //build the list from the scenes array
+      scenes.forEach(function(scene){
+         list.items.push({label: scene.sceneName, value: scene.sceneId});
+      });
+      //show the list
+      stio.showList(list).then(function(picked){
+         //if the user picked something, then execute that scene
+         if(picked){ executeScene(picked); }
+      });
+   }
+}
+
+function getScenes(){
+   axios.get(baseUrl, getAxiosConfig()).then(function(response){
+     if(response.data && Array.isArray(response.data.items)){
+       scenes = response.data.items;
+       if(scenes.length === 1){
+          content.innerText = scenes[0].sceneName;
+       }
+       else{
+          content.innerText = 'Scenes';
+       }
+     }
+   }).catch(function(error){
+     content.innerText = 'Error fetching scenes'
+   });
+}
+
+function executeScene(sceneId){
+    axios.post(baseUrl + '/' + sceneId + '/execute', null, getAxiosConfig())
+       .then(function(response){
+         console.log('Response Status', response.status);
+       });
+}
+</script>

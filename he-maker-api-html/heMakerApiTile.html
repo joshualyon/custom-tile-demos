@@ -1,9 +1,28 @@
+<!--
+  README
+  This tile displays the data from a Hubitat device. What's unique, 
+  is this tile can render HTML that's embedded in attributes. This
+  is a common approach used in custom community developed devices.
+
+  To use this tile, you'll need to setup the 'Hubitat Maker API' app
+  within your Hubitat hub. When setting up the Maker API, make sure 
+  to add a CORS entry for "https://run.sharptools.app"
+
+  After setting up the Maker API app, you  can copy any of the 
+  example URLs for use in the tile.
+
+  Additionally, you'll need to provide the numeric ID of the device
+  and the name of the attribute you want to display.
+
+  Documentation:
+  https://github.com/joshualyon/custom-tile-demos/tree/main/he-maker-api-html
+-->
 <!-- Do not edit immediately below -->
 <script type="application/json" id="tile-settings">
 {
   "schema": "0.1.0",
   "settings": [
-    {"name": "apiSample", "label": "Sample API URL", "type": "STRING"},
+    {"name": "apiSample", "label": "Sample Maker API URL", "type": "STRING"},
     {"name": "deviceId", "label": "Device ID", "type": "STRING"},
     {"name": "attribute", "label": "Attribute", "type": "STRING"}
   ],

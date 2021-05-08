@@ -17,12 +17,23 @@
 <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
 <!-- Do not edit above -->
 <iframe id="primaryIframe"></iframe>
+<div id="warning">Please configure the tile</div>
 <style>
   html, body { margin: 0; height: 100%; width: 100%; }
   #primaryIframe {
     width: 100%; 
     height: 100%;
     border: 0;
+  }
+  #warning {
+    display: none;
+    width:100%;
+    height:100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    text-align: center;
+    font-size: min(20vh, 20vw)
   }
 </style>
 <script>
@@ -32,11 +43,18 @@
 
   //grab the iframe element so it's easier to re-use
   var iframeEl = document.getElementById("primaryIframe");
+  var warningEl = document.getElementById("warning");
 
   //once things are setup
   stio.ready().then(function(data){
     //let's store the desired URL
-    url = data.settings.url
+    if(data.settings.url != null && data.settings.url != ""){
+  	  url = data.settings.url
+      hideWarning();
+    }
+  	else{
+      showWarning();
+    }
     
     //if the refresh interval is set (not null or an empty string, 0 is ok)
     if(data.settings.refreshInterval != null && data.settings.refreshInterval != ""){
@@ -44,7 +62,9 @@
     }
 
     //then call the refresh
-    refresh()
+    if(url != null && url != ""){
+      refresh()
+    }
 
     //and if the interval is greater than 0, then schedule the refreshes
     if(interval > 0){
@@ -55,5 +75,12 @@
 
   function refresh(){
     iframeEl.src = url;
+  }
+
+  function showWarning(text){
+    warningEl.style.display = 'block';
+  }
+  function hideWarning(){
+    warningEl.style.display = 'none';
   }
 </script>

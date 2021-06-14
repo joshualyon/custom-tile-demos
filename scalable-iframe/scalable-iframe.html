@@ -1,0 +1,113 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.1.0",
+  "settings": [
+    {"label": "URL", "type": "STRING", "name": "url"},
+    {"type": "NUMBER", "name": "scale", "label": "Scale (%)"},
+    {
+      "label": "Refresh Interval (minutes, default: 60)",
+      "name": "refreshInterval",
+      "type": "NUMBER"
+    }
+  ],
+  "name": "Scalable iframe",
+  "dimensions": {"height": 3, "width": 3}
+}
+</script>
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<!-- Do not edit above -->
+<iframe id="primaryIframe"></iframe>
+<div id="warning">Please configure the tile</div>
+<style>
+  html, body { margin: 0; height: 100%; width: 100%; }
+  #primaryIframe {
+    width: 100%; 
+    height: 100%;
+    border: 0;
+  }
+  #warning {
+    display: none;
+    width:100%;
+    height:100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    text-align: center;
+    font-size: min(20vh, 20vw)
+  }
+</style>
+<script>
+  //stub top level variables for the settings
+  var url;
+  var interval = 60 * 60 * 1000; //60 minutes
+  var scale = 100;
+
+  //grab the iframe element so it's easier to re-use
+  var iframeEl = document.getElementById("primaryIframe");
+  var warningEl = document.getElementById("warning");
+
+  //once things are setup
+  stio.ready().then(function(data){
+    //let's store the desired URL
+    if(data.settings.url != null && data.settings.url != ""){
+  	  url = data.settings.url
+      hideWarning();
+    }
+  	else{
+      showWarning();
+    }
+    
+    //if the refresh interval is set (not null or an empty string, 0 is ok)
+    if(data.settings.refreshInterval != null && data.settings.refreshInterval != ""){
+      interval = data.settings.refreshInterval * 60 * 1000; //minutes to millis
+    }
+    
+    //if the scale is set (not null or an empty string, 0 is ok)
+    if(data.settings.scale != null && data.settings.scale != ""){
+      scale = data.settings.scale; //percent
+    }
+    //TODO: further validate the input SCALE value to make sure it's valid
+
+    updateZoom()
+    
+    //then call the refresh
+    if(url != null && url != ""){
+      refresh()
+    }
+
+    //and if the interval is greater than 0, then schedule the refreshes
+    if(interval > 0){
+      setInterval(refresh, interval)
+    }
+    
+  })
+
+  function refresh(){
+    iframeEl.src = url;
+  }
+
+  function showWarning(text){
+    warningEl.style.display = 'block';
+  }
+  function hideWarning(){
+    warningEl.style.display = 'none';
+  }
+
+  function updateZoom(){
+    var _frameWidth = iframeEl.contentWidth;
+
+	var size = (100.0/scale) * 100.0
+    
+    iframeEl.style.width=size+"%";
+    iframeEl.style.height=size+"%";
+
+    iframeEl.style.zoom=scale;
+    iframeEl.style.webkitTransform='scale('+scale+'%)';
+    iframeEl.style.webkitTransformOrigin='top left';
+    iframeEl.style.MozTransform='scale('+scale+'%)';
+    iframeEl.style.MozTransformOrigin='top left';
+    iframeEl.style.oTransform='scale('+scale+'%)';
+    iframeEl.style.oTransformOrigin='top left';
+  }
+</script>

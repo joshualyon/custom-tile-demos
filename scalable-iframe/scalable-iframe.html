@@ -97,17 +97,20 @@
   function updateZoom(){
     var _frameWidth = iframeEl.contentWidth;
 
-	var size = (100.0/scale) * 100.0
+	var size = (100.0/scale) * 100.0;
+    var scaleFactor = scale / 100.0;
     
     iframeEl.style.width=size+"%";
     iframeEl.style.height=size+"%";
 
-    iframeEl.style.zoom=scale;
-    iframeEl.style.webkitTransform='scale('+scale+'%)';
+    iframeEl.style.zoom=scaleFactor;
+    iframeEl.style.webkitTransform='scale('+scaleFactor+')';
     iframeEl.style.webkitTransformOrigin='top left';
-    iframeEl.style.MozTransform='scale('+scale+'%)';
+    iframeEl.style.MozTransform='scale('+scaleFactor+')';
     iframeEl.style.MozTransformOrigin='top left';
-    iframeEl.style.oTransform='scale('+scale+'%)';
+    iframeEl.style.oTransform='scale('+scaleFactor+')';
     iframeEl.style.oTransformOrigin='top left';
+    iframeEl.style.transform='scale('+scaleFactor+')';
+    iframeEl.style.transformOrigin='top left';
   }
 </script>

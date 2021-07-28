@@ -35,6 +35,12 @@
       "type": "ENUM",
       "values": ["contain", "cover", "fill"],
       "default": "cover"
+    },
+    {
+      "name": "isVideoMuted",
+      "label": "Mute Videos",
+      "type": "BOOLEAN",
+      "default": true
     }
   ],
   "name": "Hubitat Google Photos"
@@ -169,6 +175,14 @@
     var newEl = document.createElement("span");
     newEl.innerHTML = html; //with our desired HTML
     newEl.style.display = "none"; //and style it as hidden
+
+    //before we append it, see if we have video elements within
+    var videoEls = newEl.getElementsByTagName('video')
+    for(var videoEl of videoEls){ //loop through them
+      videoEl.muted = tileSettings.isVideoMuted; //and mute them
+    }
+
+    //append it to the document (so it becomes real)
     contentEl.appendChild(newEl); //and then append it
     
     //wait a moment

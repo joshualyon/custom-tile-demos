@@ -1,0 +1,293 @@
+<!--
+  README
+  This tile displays the photos from the Hubitat 'Google Photos' device
+  by dkilgore. 
+
+  To use this tile, you'll need to setup the 'Hubitat Maker API' app
+  within your Hubitat hub. When setting up the Maker API, make sure 
+  to add a CORS entry for "https://run.sharptools.app"
+
+  After setting up the Maker API app, you  can copy any of the 
+  example *cloud* URLs for use in the tile.
+
+  Optionally, provide the numeric ID of the device you want to display.
+  Otherwise the system will try to find the first 'Google Photos' device
+
+  Documentation:
+  https://github.com/joshualyon/custom-tile-demos/tree/main/he-google-photos
+-->
+<!-- Do not edit immediately below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.1.0",
+  "settings": [
+    {"name": "apiSample", "label": "Sample Maker API URL", "type": "STRING"},
+    {"name": "deviceId", "label": "Device ID", "type": "STRING"},
+    {
+      "name": "refreshRate",
+      "label": "Refresh Rate (minutes)",
+      "type": "STRING",
+      "default": "5"
+    },
+    {
+      "name": "scaling",
+      "label": "Scaling (contain, cover, fill)",
+      "type": "ENUM",
+      "values": ["contain", "cover", "fill"],
+      "default": "cover"
+    }
+  ],
+  "name": "Hubitat Google Photos"
+}
+</script>
+<!-- Do not edit above -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
+<script src="//cdn.sharptools.io/js/custom-tiles.js"></script>
+<div class="main-content" onclick="sendNext()">
+  <div id="content"><span data-index="0">Loading...</span></div>
+</div>
+<script>
+  //stub a variable to hold the settings at a higher scope
+  var tileSettings = { 
+    // apiSample: "https://cloud.hubitat.com/api/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX/apps/999/devices?access_token=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", 
+    // deviceId: "67",
+    // attribute: "visualWithText"
+  }
+  var apiSettings = {};
+  var _deviceId;
+  var timerId;
+  var REFRESH_INTERVAL = 5 * 60 * 1000; //every 5 minutes
+  var ELEMENT_SWAP_INTERVAL = 500; //give 500 milliseconds for images in new HTML to render
+  var REFRESH_DELAY = 1500; //wait x millis after sending next() before attempting to refresh the data
+  var TARGET_ATTRIBUTE = 'image'
+  var TARGET_DEVICE_TYPE = "Google Photos Device"; //used to look for a matching device if a device ID is not specified
+  
+  //get the content element so we can update it later
+  var contentEl = document.getElementById("content");
+  //when the tile is ready
+  stio.ready(function(data){
+    //get the settings from the callback
+    tileSettings = data.settings; //apiSample, deviceId, attribute
+    //and initialize the tile
+    init();
+  });
+
+  function init(){
+    //parse the relevant settings out of the apiSample
+    parseApiSample();
+
+    injectImageStyle();
+
+    //if we don't have required settings, exit early
+    if(apiSettings.hubId == null) return;
+    
+    //make a call to the Hubitat API to get some data
+    refresh().then(function(){
+      //if the first refresh is successful, schedule the periodic refreshes
+      timerId = setInterval(refresh, REFRESH_INTERVAL);
+    });
+  }
+
+  function injectImageStyle(){
+    var fit = tileSettings && tileSettings.scaling || 'cover';
+    var css = `#content img, #content video { object-fit: ${fit}}`
+    injectCss(css)
+  }
+
+  function injectCss(css){
+    console.log('injecting', css)
+    var style = document.createElement('style');
+    document.head.appendChild(style);
+    
+    style.type = 'text/css';
+    style.appendChild(document.createTextNode(css));
+  }
+
+  //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
+  function showError(message){
+    // console.error(message);
+    // stio.showToast(message, "red");
+    contentEl.innerText = message;
+  }
+
+  //parse out the various components from a provided Maker API URL
+  function parseApiSample(sampleUrl){
+    //if we weren't passed in an explicit URL to parse
+    if(sampleUrl == null){
+      //then try to use the sample API URL from the tile settings
+      sampleUrl = tileSettings.apiSample;
+    }
+    //if no URL was provided, let the user know
+    if(sampleUrl == null || sampleUrl === "") return showError("No API URL was provided. Please configure the tile.");
+    //if the api isn't the cloud API, let the user know
+    if(sampleUrl.indexOf("cloud.hubitat.com") < 0) return showError("Please use the Hubitat Maker API CLOUD URI.")
+
+    //try to parse out the various parts of the URL we need with a regular expression
+    var re = /https:\/\/cloud\.hubitat\.com\/api\/([^\/]+)\/apps\/([\d]+)\/[^\?]+\?access_token\=([^\&]+)/;
+    var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: hub id, 2: app id, 3: token)
+
+    //pass the parsed settings back into the top-level variable
+    apiSettings = { 
+      "hubId": match[1], 
+      "appId": match[2], 
+      "token": match[3]
+    };
+  }
+
+  //helper function to format the parsed data back into a base URI
+  function getBaseUrl(){
+    return `https://cloud.hubitat.com/api/${apiSettings.hubId}/apps/${apiSettings.appId}`
+  }
+  //helper function to format the token into an axios 'data' object to attach the token as a parameter
+  function getAxiosConfig(){
+    return {params: {access_token: apiSettings.token}};
+  }
+
+  function refresh(){
+    return getThing().then(function(thing){
+      //try to find the desired parameter
+      let attribute = thing.attributes.find(function(attr){ return attr.name === TARGET_ATTRIBUTE});
+      //if we didn't get the attribute, bail out
+      if(attribute == null){
+        console.error('Could not find desired attribute in thing', thing)
+        return showError("Could not find desired attribute");
+      } 
+      
+      //otherwise inject the attribute value as HTML
+      updateHTML(attribute.currentValue); //this approach appends a hidden node, waits a moment, then displays it
+      //contentEl.innerHTML = attribute.currentValue //this approach just replaces the HTML which is more efficient, but can result in image flicker
+    }).catch(function(error){
+      console.error('Error with thing retrieval/parsing', error)
+      showError(error.message);
+    });
+  }
+
+  function updateHTML(html){
+    //find the OLD child node
+    var oldEl = contentEl.firstChild; //alternatively we could tag the Node and try to find it
+    //create a NEW child node
+    var newEl = document.createElement("span");
+    newEl.innerHTML = html; //with our desired HTML
+    newEl.style.display = "none"; //and style it as hidden
+    contentEl.appendChild(newEl); //and then append it
+    
+    //wait a moment
+    setTimeout(function(){
+      //show the NEW child node  
+      newEl.style.removeProperty("display");
+      //hide the OLD child node
+      oldEl.style.display = "none";
+      oldEl.remove(); //remove itself
+    }, ELEMENT_SWAP_INTERVAL);
+    
+  }
+
+  function getDeviceId(){
+
+	if(_deviceId) return Promise.resolve(_deviceId);
+    
+    //if we have a device ID
+    var isDeviceIdSet = (tileSettings && tileSettings.deviceId != null && tileSettings.deviceId != "");
+    var isDeviceIdNumeric = isDeviceIdSet && parseInt(tileSettings.deviceId, 10) > 0;
+      
+    if(isDeviceIdSet && isDeviceIdNumeric){
+      _deviceId = tileSettings.deviceId;
+      return Promise.resolve(tileSettings.deviceId);
+    }
+    else{
+      console.log('Device ID is not set. Attempting to query all things.')
+      //try to query for it
+      return getThings().then(function(things){
+        console.log(`Got things. Looking for ${TARGET_DEVICE_TYPE}`, things);
+        //find the thing in the data
+        var thing = things.find(function(thing){
+          return thing.type === TARGET_DEVICE_TYPE;
+        }); 
+        //if we don't have thing, show a basic error
+        if(thing === null){
+          return showError('Could not find target device type.')
+        }
+        //if we have a thing, return the id
+        else{
+          console.log('Found thing', thing);
+          _deviceId = thing.id;
+          return thing.id;
+        }
+      })
+    }
+  }
+
+  function getThings(){
+    let url = getBaseUrl() + `/devices/`
+    let config = getAxiosConfig();
+    //make the API call
+    return axios.get(url, config).then(function(response){
+      if(response.data && response.data.length != null){
+        //return the data ('things')
+        return response.data;
+      }
+    }).catch(function(error){
+      console.error('Error retrieving things', error);
+      showError("Error retrieving things from HE Maker API")
+    })
+  }
+
+  function getThing(){
+    var config = getAxiosConfig();
+
+    return getDeviceId().then(function(deviceId){
+      var url = getBaseUrl() + `/devices/${deviceId}`
+      return axios.get(url, config);
+    }).then(function(response){
+      //if we got a response with the expected base data
+      if(response.data && response.data.attributes){
+        //return the response
+        return response.data; //TODO: we could parse it into a more helpful "Thing" object format
+      }
+    }).catch(function(error){
+      console.error('Error retrieving thing', error);
+      showError("Error communicating with Maker API")
+    })
+  }
+
+  function sendThingCommand(command){
+    var config = getAxiosConfig();
+    return getDeviceId().then(function(deviceId){
+      var url = getBaseUrl() + `/devices/${deviceId}/${command}`
+      return axios.get(url, config);
+    }).then(function(response){
+      stio.showToast('Command sent', 'green');
+    }).catch(function(error){
+      console.error('Error sending command', error);
+      //showError("Error communicating with Maker API")
+      stio.showToast('Error sending command', "red");
+    })
+  }
+
+  function sendNext(){
+    console.log('sending next command')
+    return sendThingCommand('next').then(function(){
+      setTimeout(refresh, REFRESH_DELAY);
+    });
+  }
+</script>
+
+<style>
+  html,body {height: 100%;margin:0;}
+  .main-content {
+    display: flex;
+    height:100%;
+    align-items: center;
+    justify-content: center;
+  }
+  .main-content #content {
+    height: 100%;
+    width: 100%;
+    text-align: center; /* for error messages */
+  }
+  #content img, #content video {
+    width: 100%; 
+    height: 100%;
+  }
+
+</style>

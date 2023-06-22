@@ -1,0 +1,417 @@
+<!--
+    THIS IS THE COMPILED VERSION OF homey-gauge WHICH SUPPORTS NEW AND OLD BROWSERS
+    IF YOU ARE LOOKING FOR THE ORIGINAL SOURCE, CHECK THE /homey/src/ FOLDER OF THE
+    GITHUB REPO 
+-->
+<script type="application/json" id="tile-settings">
+    {
+      "schema": "0.1.0",
+      "settings": [{"name":"gaugeLabel","label":"Label (optional)","type":"STRING"},{"name":"apiType","label":"API Type","type":"ENUM","values":[{"value":"pat","label":"API Key"},{"value":"homeyInk","label":"Homey Ink Token"}]},{"name":"patToken","label":"API Token","type":"STRING","showIf":["apiType","==","pat"]},{"name":"patConfigApproach","label":"Configuration Approach","type":"ENUM","values":[{"value":"urlSample","label":"URL Sample"},{"value":"manual","label":"Manual"}],"showIf":["apiType","==","pat"]},{"name":"localIp","label":"Homey Local IP","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"homeyUrlSample","label":"Homey Sample URL","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"urlSample"}]},{"name":"homeyInkUrlSample","label":"Homey Ink Sample URL","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"deviceIdPat","label":"Device ID","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"deviceId","label":"Device ID","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"capabilityId","label":"Capability ID","type":"STRING","showIf":["apiType","!=",null]},{"name":"chartSettings","label":"Chart Settings (JSON)","type":"STRING","showIf":["apiType","!=",null]}],
+      "name": "Homey Google Gauge"
+    }
+</script>
+<!-- Do not edit above -->
+<style>
+html, body { height: 100% };
+#chart { height: 100%; width: 100%;}
+</style>
+
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script type="text/javascript" src="https://cdn.athom.com/homey-api/3.0.3.js"></script>
+
+<div id="chart" align="center"></div>
+<script>
+function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
+    try {
+        var info = gen[key](arg);
+        var value = info.value;
+    } catch (error) {
+        reject(error);
+        return;
+    }
+    if (info.done) {
+        resolve(value);
+    } else {
+        Promise.resolve(value).then(_next, _throw);
+    }
+}
+function _async_to_generator(fn) {
+    return function() {
+        var self = this, args = arguments;
+        return new Promise(function(resolve, reject) {
+            var gen = fn.apply(self, args);
+            function _next(value) {
+                asyncGeneratorStep(gen, resolve, reject, _next, _throw, "next", value);
+            }
+            function _throw(err) {
+                asyncGeneratorStep(gen, resolve, reject, _next, _throw, "throw", err);
+            }
+            _next(undefined);
+        });
+    };
+}
+function _ts_generator(thisArg, body) {
+    var f, y, t, g, _ = {
+        label: 0,
+        sent: function() {
+            if (t[0] & 1) throw t[1];
+            return t[1];
+        },
+        trys: [],
+        ops: []
+    };
+    return(g = {
+        next: verb(0),
+        "throw": verb(1),
+        "return": verb(2)
+    }, typeof Symbol === "function" && (g[Symbol.iterator] = function() {
+        return this;
+    }), g);
+    function verb(n) {
+        return function(v) {
+            return step([
+                n,
+                v
+            ]);
+        };
+    }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while(_)try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [
+                op[0] & 2,
+                t.value
+            ];
+            switch(op[0]){
+                case 0:
+                case 1:
+                    t = op;
+                    break;
+                case 4:
+                    _.label++;
+                    return {
+                        value: op[1],
+                        done: false
+                    };
+                case 5:
+                    _.label++;
+                    y = op[1];
+                    op = [
+                        0
+                    ];
+                    continue;
+                case 7:
+                    op = _.ops.pop();
+                    _.trys.pop();
+                    continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) {
+                        _ = 0;
+                        continue;
+                    }
+                    if (op[0] === 3 && (!t || op[1] > t[0] && op[1] < t[3])) {
+                        _.label = op[1];
+                        break;
+                    }
+                    if (op[0] === 6 && _.label < t[1]) {
+                        _.label = t[1];
+                        t = op;
+                        break;
+                    }
+                    if (t && _.label < t[2]) {
+                        _.label = t[2];
+                        _.ops.push(op);
+                        break;
+                    }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop();
+                    continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) {
+            op = [
+                6,
+                e
+            ];
+            y = 0;
+        } finally{
+            f = t = 0;
+        }
+        if (op[0] & 5) throw op[1];
+        return {
+            value: op[0] ? op[1] : void 0,
+            done: true
+        };
+    }
+}
+var init = function init() {
+    //parse the relevant settings out of the urlSample
+    parseUrlSample();
+    if (tileSettings.deviceId == null || tileSettings.deviceId == "") {
+        return showError("Device ID is not set");
+    }
+    //if we got this far, it seems like we have a valid configuration, so lets initialize the API
+    initializeApi().then(function() {
+        console.log("API has been initialized.");
+        //make a call to Homey to get some data
+        valuePollingScheduler();
+    });
+};
+var showError = //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
+function showError(message) {
+    console.error(message);
+    stio.showToast(message, "red");
+    document.getElementById("chart").innerHTML = "Error";
+};
+var parseUrlSample = //parse out the various components from a provided Sample URL
+function parseUrlSample() {
+    //determine which type of URL we are going to sample
+    var type = tileSettings.apiType //pat | homeyInk
+    ;
+    var sampleUrl, baseDomain = "my.homey.app";
+    //determine the type of URL we will sample (if any)
+    if (type === "pat" && tileSettings.patConfigApproach !== "urlSample") return; //exit early if we don't need to parse the URL
+    else if (type === "pat") {
+        sampleUrl = tileSettings.homeyUrlSample;
+        baseDomain = "my.homey.app";
+    } else if (type === "homeyInk") {
+        sampleUrl = tileSettings.homeyInkUrlSample;
+        baseDomain = "app.homey.ink";
+    }
+    //if no URL was provided, let the user know
+    if (sampleUrl == null || sampleUrl === "") showError("No Sample URL was provided. Please configure the tile.");
+    //if the api isn't the cloud API, let the user know
+    if (sampleUrl.indexOf(baseDomain) < 0) showError("Please use valid sample Homey URL");
+    if (type === "pat") {
+        //try to parse out the various parts of the URL we need with a regular expression
+        var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/([a-e0-9\-]+)/;
+        var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
+        if (Array.isArray(match) && match.length >= 2) {
+            //pass the parsed settings back into the top-level variable
+            try {
+                tileSettings.cloudId = match[1];
+                tileSettings.deviceId = match[2];
+            } catch (error) {
+                showError("Unable to parse Cloud ID and Device ID from sample URL.");
+            }
+        }
+    } else if (type === "homeyInk") {
+        //try to parse out the various parts of the URL we need with a regular expression
+        var re1 = /https:\/\/app\.homey\.ink\/\?theme=web&token=([^&]+)/;
+        var match = sampleUrl.match(re1); //array of the various regex matches (0: full string, 1: token)
+        if (Array.isArray(match) && match.length >= 1) {
+            //pass the parsed settings back into the top-level variable
+            try {
+                apiSettings.token = JSON.parse(atob(decodeURIComponent(match[1])));
+                console.log("Successfully parsed Homey Ink token.");
+            } catch (error) {
+                showError("Unable to parse token from sample URL");
+            }
+        }
+    }
+};
+var getAxiosConfig = //helper function to format the token into an axios 'data' object to attach the token as a parameter
+function getAxiosConfig() {
+    return {
+        headers: {
+            "Authorization": "Bearer ".concat(tileSettings.patToken)
+        }
+    };
+};
+var initChart = function initChart() {
+    console.log("Initialize Google Chart");
+    chartData = google.visualization.arrayToDataTable([
+        [
+            "Label",
+            "Value"
+        ],
+        [
+            "Battery",
+            0
+        ]
+    ]);
+    chart = new google.visualization.Gauge(document.getElementById("chart"));
+};
+var getChartOptions = function getChartOptions() {
+    if (tileSettings.chartSettings) {
+        try {
+            return JSON.parse(tileSettings.chartSettings);
+        } catch (error) {
+            stio.showToast("Invalid chart settings. Using defaults");
+        //showError('Unable to parse chart settings. Falling back to defaults.')
+        }
+    }
+    return {};
+};
+//stub a variable to hold the settings at a higher scope
+var tileSettings = {};
+var apiSettings = {};
+var cloudApi; //this will get initialized with a valid configuration
+var homeyApi; //same regarding initialization
+//setup the chart variables
+var chart, chartData;
+var chartOptions = {};
+// {
+//   min: 0, max: 100,
+//   redFrom: 0, redTo: 20,
+//   yellowFrom:20, yellowTo: 40,
+//   minorTicks: 5
+// };
+//Load gauge script
+google.charts.load("current", {
+    "packages": [
+        "gauge"
+    ]
+});
+google.charts.setOnLoadCallback(initChart);
+stio.ready(function(data) {
+    //get the settings from the callback
+    tileSettings = data.settings; //urlSample, deviceId, gaugeLabel
+    //and initialize the tile
+    init();
+});
+var getBaseUrl = function() {
+    var _ref = _async_to_generator(function() {
+        var _response_data_ethernetAddress, address, re, matches, ip, dashedIp;
+        return _ts_generator(this, function(_state) {
+            switch(_state.label){
+                case 0:
+                    return [
+                        4,
+                        axios.get("https://".concat(tileSettings.cloudId, ".connect.athom.com/api/manager/system/"), getAxiosConfig()).then(function(response) {
+                            return (_response_data_ethernetAddress = response.data.ethernetAddress) !== null && _response_data_ethernetAddress !== void 0 ? _response_data_ethernetAddress : response.data.wifiAddress;
+                        })
+                    ];
+                case 1:
+                    address = _state.sent();
+                    re = /^.*?((?:\d+\.){3}\d+).*$/;
+                    matches = address.match(re);
+                    if (Array.isArray(matches) && matches.length > 1) {
+                        ip = matches[1];
+                        dashedIp = ip.split(".").join("-");
+                        return [
+                            2,
+                            "https://".concat(dashedIp, ".homey.homeylocal.com")
+                        ];
+                    }
+                    return [
+                        2
+                    ]; //nothing to return if it's bad
+            }
+        });
+    });
+    return function getBaseUrl() {
+        return _ref.apply(this, arguments);
+    };
+}();
+var initializeApi = function() {
+    var _ref = _async_to_generator(function() {
+        var address, user, homey;
+        return _ts_generator(this, function(_state) {
+            switch(_state.label){
+                case 0:
+                    if (!(tileSettings.apiType === "pat")) return [
+                        3,
+                        3
+                    ];
+                    return [
+                        4,
+                        getBaseUrl()
+                    ];
+                case 1:
+                    address = _state.sent();
+                    return [
+                        4,
+                        HomeyAPI.createLocalAPI({
+                            address: address,
+                            token: tileSettings.patToken
+                        })
+                    ];
+                case 2:
+                    homeyApi = _state.sent();
+                    return [
+                        3,
+                        7
+                    ];
+                case 3:
+                    if (!(tileSettings.apiType === "homeyInk")) return [
+                        3,
+                        7
+                    ];
+                    cloudApi = new AthomCloudAPI({
+                        token: new AthomCloudAPI.Token(apiSettings.token)
+                    });
+                    return [
+                        4,
+                        cloudApi.getAuthenticatedUser()
+                    ];
+                case 4:
+                    user = _state.sent();
+                    return [
+                        4,
+                        user.getFirstHomey()
+                    ];
+                case 5:
+                    homey = _state.sent();
+                    return [
+                        4,
+                        homey.authenticate()
+                    ];
+                case 6:
+                    // Create a session on this Homey
+                    homeyApi = _state.sent();
+                    _state.label = 7;
+                case 7:
+                    return [
+                        2
+                    ];
+            }
+        });
+    });
+    return function initializeApi() {
+        return _ref.apply(this, arguments);
+    };
+}();
+var getDeviceValue = function() {
+    var _ref = _async_to_generator(function() {
+        var device, value, _tileSettings_gaugeLabel;
+        return _ts_generator(this, function(_state) {
+            switch(_state.label){
+                case 0:
+                    return [
+                        4,
+                        homeyApi.devices.getDevice({
+                            id: tileSettings.deviceId
+                        })
+                    ];
+                case 1:
+                    device = _state.sent();
+                    value = device.capabilitiesObj[tileSettings.capabilityId].value;
+                    console.log("Received ".concat(tileSettings.capabilityId, " reading: ").concat(value));
+                    //Set chart value and draw chart
+                    if (chart && chartData) {
+                        chartData.setValue(0, 1, value);
+                        ;
+                        //if the user provided a label, use it
+                        chartData.setValue(0, 0, (_tileSettings_gaugeLabel = tileSettings.gaugeLabel) !== null && _tileSettings_gaugeLabel !== void 0 ? _tileSettings_gaugeLabel : "");
+                        chart.draw(chartData, getChartOptions());
+                    }
+                    return [
+                        2
+                    ];
+            }
+        });
+    });
+    return function getDeviceValue() {
+        return _ref.apply(this, arguments);
+    };
+}();
+function valuePollingScheduler() {
+    getDeviceValue();
+    console.log("polling value in 5 minutes");
+    setTimeout(valuePollingScheduler, 300000);
+}
+</script>

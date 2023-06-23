@@ -1,0 +1,192 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+    {
+      "schema": "0.1.0",
+      "settings": [{"name":"apiType","label":"API Type","type":"ENUM","values":[{"value":"pat","label":"API Key"},{"value":"homeyInk","label":"Homey Ink Token"}]},{"name":"patToken","label":"API Token","type":"STRING","showIf":["apiType","==","pat"]},{"name":"patConfigApproach","label":"Configuration Approach","type":"ENUM","values":[{"value":"urlSample","label":"URL Sample"},{"value":"manual","label":"Manual"}],"showIf":["apiType","==","pat"]},{"name":"localIp","label":"Homey Local IP","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"homeyUrlSample","label":"Homey Sample URL","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"urlSample"}]},{"name":"homeyInkUrlSample","label":"Homey Ink Sample URL","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"deviceIdPat","label":"Device ID","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"deviceId","label":"Device ID","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"capabilityId","label":"Capability ID","type":"STRING","showIf":["apiType","!=",null]}],
+      "name": "Homey Image Display"
+    }
+</script>
+<!-- Do not edit above -->
+<style>
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #user-image { height: 100%; width: 100%; object-fit: cover; }
+</style>
+
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script type="text/javascript" src="https://cdn.athom.com/homey-api/3.0.3.js"></script>
+
+<img id="user-image">
+<script>
+    //stub a variable to hold the settings at a higher scope
+    let tileSettings = {}
+    let apiSettings = {};
+    
+    let cloudApi; //this will get initialized with a valid configuration
+    let homeyApi; //same regarding initialization
+
+    let imgEl = document.getElementById("user-image")
+    
+    stio.ready(function(data){
+    //get the settings from the callback
+    tileSettings = data.settings; //urlSample, deviceId, gaugeLabel
+    
+    //and initialize the tile
+    init();
+    });
+
+    function init(){
+    //parse the relevant settings out of the urlSample
+    parseUrlSample();
+
+    if(tileSettings.deviceId == null || tileSettings.deviceId == ""){
+        return showError("Device ID is not set");
+    }
+
+    //if we got this far, it seems like we have a valid configuration, so lets initialize the API
+    initializeApi().then(()=>{
+        console.log('API has been initialized.')
+        
+        //make a call to Homey to get some data
+        valuePollingScheduler();
+    });
+    }
+    
+    const getBaseUrl = async () => {
+    let address;
+    if(tileSettings.patConfigApproach === "manual")
+        address = tileSettings.localIp
+    else
+        address = await axios.get(`https://${tileSettings.cloudId}.connect.athom.com/api/manager/system/`, getAxiosConfig()).then(response => response.data.ethernetAddress ?? response.data.wifiAddress);
+    
+    // let address = ip;
+    let re = /^.*?((?:\d+\.){3}\d+).*$/
+    let matches = address.match(re);
+    if(Array.isArray(matches) && matches.length > 1){
+        let ip = matches[1];
+        let dashedIp = ip.split(".").join("-")
+        return `https://${dashedIp}.homey.homeylocal.com`
+    }
+    return; //nothing to return if it's bad
+    }
+
+    let initializeApi = async () => {
+    if(tileSettings.apiType === "pat"){
+        //query the API via cloud proxy to get the local IP address and then use that to connect
+        let address = await getBaseUrl();
+        
+        homeyApi = await HomeyAPI.createLocalAPI({
+        address: address, // Use the cloud proxy for now
+        token: tileSettings.patToken, // Replace this with your API Key
+        });
+    }
+    else if(tileSettings.apiType === "homeyInk"){
+        cloudApi = new AthomCloudAPI({
+        clientId: "5cbb504da1fc782009f52e46",
+        clientSecret: "gvhs0gebgir8vz8yo2l0jfb49u9xzzhrkuo1uvs8",
+        token: new AthomCloudAPI.Token(apiSettings.token)
+        });
+
+        // Get the logged in user
+        const user = await cloudApi.getAuthenticatedUser();
+        
+        // Get the first Homey of the logged in user
+        const homey = await user.getFirstHomey();
+        
+        // Create a session on this Homey
+        homeyApi = await homey.authenticate();
+
+        let systemInfo = await homeyApi.system.getInfo();
+        tileSettings.cloudId = systemInfo.cloudId;
+    }
+    }
+
+    //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
+    function showError(message){
+    console.error(message);
+    stio.showToast(message, "red");
+    document.getElementById("chart").innerHTML = "Error";
+    }
+
+    //parse out the various components from a provided Sample URL
+    function parseUrlSample(){
+    //determine which type of URL we are going to sample
+    let type = tileSettings.apiType //pat | homeyInk
+    let sampleUrl, baseDomain = "my.homey.app";
+
+    //determine the type of URL we will sample (if any)
+    if(type === "pat" && tileSettings.patConfigApproach !== "urlSample") return; //exit early if we don't need to parse the URL
+    else if(type === "pat"){ 
+        sampleUrl = tileSettings.homeyUrlSample;
+        baseDomain = "my.homey.app"
+    }
+    else if(type === "homeyInk") {
+        sampleUrl = tileSettings.homeyInkUrlSample;
+        baseDomain = "app.homey.ink"
+    }
+    
+    //if no URL was provided, let the user know
+    if(sampleUrl == null || sampleUrl === "") showError("No Sample URL was provided. Please configure the tile.");
+
+    
+    //if the api isn't the cloud API, let the user know
+    if(sampleUrl.indexOf(baseDomain) < 0) 
+        showError("Please use valid sample Homey URL")
+
+    if(type === "pat"){
+        //try to parse out the various parts of the URL we need with a regular expression
+        let re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-e0-9\-]+)/
+        var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
+        if(Array.isArray(match) && match.length >= 2){
+        //pass the parsed settings back into the top-level variable
+        try{
+            tileSettings.cloudId = match[1];
+            tileSettings.deviceId = match[2];
+        }
+        catch(error){
+            showError('Unable to parse Cloud ID and Device ID from sample URL.')
+        }
+        }
+    }  
+    else if(type === "homeyInk"){
+        //try to parse out the various parts of the URL we need with a regular expression
+        let re = /https:\/\/app\.homey\.ink\/\?theme=web&token=([^&]+)/
+        var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: token)
+        if(Array.isArray(match) && match.length >= 1){
+        //pass the parsed settings back into the top-level variable
+        try{
+            apiSettings.token = JSON.parse(atob(decodeURIComponent(match[1])))
+            console.log('Successfully parsed Homey Ink token.')
+        }
+        catch(error){
+            showError('Unable to parse token from sample URL')
+        }
+        }
+    }
+    }
+
+    //helper function to format the token into an axios 'data' object to attach the token as a parameter
+    function getAxiosConfig(){
+    return {headers: {"Authorization": `Bearer ${tileSettings.patToken}`}};
+    }
+    
+    let getDeviceValue = async () => {  
+    let device = await homeyApi.devices.getDevice({id: tileSettings.deviceId})
+    let url;
+    if(tileSettings.capabilityId != "" && device.capabilitiesObj[tileSettings.capabilityId])
+        url = device.capabilitiesObj[tileSettings.capabilityId].value
+    else if(device.images.length > 0){
+        let path = device.images[0].imageObj.url
+        url = `https://${tileSettings.cloudId}.connect.athom.com` + path;
+    }
+    console.log(`Received ${tileSettings.capabilityId} reading: ${url}`);
+    
+    imgEl.src = url;
+    }
+    
+    function valuePollingScheduler(){
+    getDeviceValue();
+    console.log("polling value in 5 minutes");
+    setTimeout(valuePollingScheduler, 300000);
+    }
+</script>

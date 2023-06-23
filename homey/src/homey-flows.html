@@ -1,0 +1,117 @@
+<!-- 
+  README
+  Create a Homey 'Personal Access Token' with access to Flows and use it
+  for the 'token' setting in the tile.
+
+  https://my.homey.app/settings/system/api-keys/create
+
+	You'll also need the Homey Cloud ID which you can find in the URL when 
+  you access your Homey at my.homey.app.
+
+  https://my.homey.app/homeys/{{HOMEY_CLOUD_ID}}
+
+  Or you can copy it from your Homey Settings under Cloud -> Homey ID:
+	https://my.homey.app/settings/system/general
+-->
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+    {
+      "schema": "0.1.0",
+      "settings": [
+        {"label": "Token", "type": "STRING", "name": "token"},
+        {"name": "homeyCloudId", "label": "Homey Cloud ID", "type": "STRING"}
+      ],
+      "name": "Homey Flows"
+    }
+</script>
+<!-- Do not edit above -->
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js">
+</script>
+<div class="main-content" id="mainContent">Initializing...</div>
+
+<style>
+    html, body { margin: 0; height:100%; }
+    .main-content { 
+        width: 100%; height: 100%; 
+        padding: 0; margin: 0; 
+        display: flex; 
+        align-items: center; justify-content: center; 
+        text-align: center;
+        font-size: min(20vh, 20vw); 
+    }
+</style>
+<script>
+    var content = document.getElementById("mainContent");
+    var patToken = null;
+    var cloudId = null;
+    var flows = [];
+    var URL_TEMPLATE = "https://{{cloudId}}.connect.athom.com/api/manager/";
+      
+    
+    content.onclick = onClick; //setup the click handler
+    
+    function getAxiosConfig(){
+      return { "headers": { "Authorization": "Bearer " + patToken } }
+    }
+    
+    stio.ready((data)=>{
+       console.log("stio library is ready with token", data.settings.token);
+       if(data.settings.token == null){
+          content.innerText = "Please configure the tile";
+          return;
+       }
+       else{
+          patToken = data.settings.token;
+          cloudId = data.settings.homeyCloudId;
+       }
+       
+       content.innerText = "Loading...";
+       getFlows();
+    });
+    
+    function onClick(){
+       if(flows.length === 1){
+         //execute the one flow we have
+         executeFlow(flows[0].flowId);
+       }
+       else{
+          var list = {title: "Flows", items: []};
+          //build the list from the flows array
+          flows.forEach(function(flow){
+             list.items.push({label: flow.name, value: flow.id});
+          });
+          //show the list
+          stio.showList(list).then(function(picked){
+             //if the user picked something, then execute that flow
+             if(picked){ executeFlow(picked); }
+          });
+       }
+    }
+    
+    function getFlows(){
+      let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/"
+      axios.get(url, getAxiosConfig()).then(function(response){
+       if(response.data){
+         flows = Object.values(response.data);
+         if(flows.length === 1){
+            content.innerText = flows[0].name;
+         }
+         else{
+            content.innerText = 'Flows';
+         }
+       }
+      }).catch(function(error){
+       content.innerText = 'Error fetching flows'
+      });
+    }
+    
+    function executeFlow(flowId){
+      let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/"
+      url = url + flowId + "/trigger"
+      axios.post(url, null, getAxiosConfig())
+         .then(function(response){
+           console.log('Response Status', response.status);
+         });
+    }
+</script>

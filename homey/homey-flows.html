@@ -1,18 +1,19 @@
-<!--
-    THIS IS THE COMPILED VERSION OF homey-gauge WHICH SUPPORTS NEW AND OLD BROWSERS
-    IF YOU ARE LOOKING FOR THE ORIGINAL SOURCE, CHECK THE /homey/src/ FOLDER OF THE
-    GITHUB REPO 
--->
-<!-- Do not edit below -->
 <script type="application/json" id="tile-settings">
-  {
-    "schema": "0.1.0",
-    "settings": [
-      {"label": "Token", "type": "STRING", "name": "token"},
-      {"name": "homeyCloudId", "label": "Homey Cloud ID", "type": "STRING"}
-    ]
-  }
-  </script>
+    {
+      "schema": "0.1.0",
+      "settings": [
+        {"name": "token", "label": "Token", "type": "STRING"},
+        {"name": "homeyCloudId", "label": "Homey Cloud ID", "type": "STRING"},
+        {
+          "name": "isFavoritesOnly",
+          "label": "Only Show Favorites",
+          "type": "BOOLEAN",
+          "default": false
+        }
+      ],
+      "name": "Homey Flows"
+    }
+</script>
 <!-- Do not edit above -->
 <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js">
@@ -20,87 +21,122 @@
 <div class="main-content" id="mainContent">Initializing...</div>
 
 <style>
-  html, body { margin: 0; height:100%; }
-  .main-content { 
-      width: 100%; height: 100%; 
-      padding: 0; margin: 0; 
-      display: flex; 
-      align-items: center; justify-content: center; 
-      text-align: center;
-      font-size: min(20vh, 20vw); 
+    html, body { margin: 0; height:100%; }
+    .main-content { 
+        width: 100%; height: 100%; 
+        padding: 0; margin: 0; 
+        display: flex; 
+        align-items: center; justify-content: center; 
+        text-align: center;
+        font-size: min(20vh, 20vw); 
     }
 </style>
 <script>
-  var getAxiosConfig = function getAxiosConfig() {
-      return {
-          "headers": {
-              "Authorization": "Bearer " + patToken
-          }
-      };
-  };
-  var onClick = function onClick() {
-      if (flows.length === 1) {
-          //execute the one flow we have
-          executeFlow(flows[0].flowId);
-      } else {
-          var list = {
-              title: "Flows",
-              items: []
-          };
-          //build the list from the flows array
-          flows.forEach(function(flow) {
-              list.items.push({
-                  label: flow.name,
-                  value: flow.id
-              });
-          });
-          //show the list
-          stio.showList(list).then(function(picked) {
-              //if the user picked something, then execute that flow
-              if (picked) {
-                  executeFlow(picked);
-              }
-          });
-      }
-  };
-  var getFlows = function getFlows() {
-      var url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/";
-      axios.get(url, getAxiosConfig()).then(function(response) {
-          if (response.data) {
-              flows = Object.values(response.data);
-              if (flows.length === 1) {
-                  content.innerText = flows[0].name;
-              } else {
-                  content.innerText = "Flows";
-              }
-          }
-      }).catch(function(error) {
-          content.innerText = "Error fetching flows";
-      });
-  };
-  var executeFlow = function executeFlow(flowId) {
-      var url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/";
-      url = url + flowId + "/trigger";
-      axios.post(url, null, getAxiosConfig()).then(function(response) {
-          console.log("Response Status", response.status);
-      });
-  };
-  var content = document.getElementById("mainContent");
-  var patToken = null;
-  var cloudId = null;
-  var flows = [];
-  var URL_TEMPLATE = "https://{{cloudId}}.connect.athom.com/api/manager/";
-  content.onclick = onClick; //setup the click handler
-  stio.ready(function(data) {
-      console.log("stio library is ready with token", data.settings.token);
-      if (data.settings.token == null) {
-          content.innerText = "Please configure the tile";
-          return;
-      } else {
-          patToken = data.settings.token;
-          cloudId = data.settings.homeyCloudId;
-      }
-      content.innerText = "Loading...";
-      getFlows();
-  });
+var getAxiosConfig = function getAxiosConfig() {
+    return {
+        "headers": {
+            "Authorization": "Bearer " + patToken
+        }
+    };
+};
+var onClick = function onClick() {
+    if (flows.length === 1) {
+        //execute the one flow we have
+        executeFlow(flows[0].flowId);
+    } else {
+        var list = {
+            title: "Flows",
+            items: []
+        };
+        //build the list from the flows array
+        flows.forEach(function(flow) {
+            list.items.push({
+                label: flow.name,
+                value: flow.id
+            });
+        });
+        //show the list
+        stio.showList(list).then(function(picked) {
+            //if the user picked something, then execute that flow
+            if (picked) {
+                executeFlow(picked);
+            }
+        });
+    }
+};
+var getData = function getData() {
+    var promises = [
+        getFlows()
+    ];
+    if (isFavoritesOnly) {
+        promises.push(getUserMe());
+    }
+    Promise.all(promises).then(function(promiseResults) {
+        if (isFavoritesOnly) {
+            flows = rawFlows.filter(function(flow) {
+                return favoriteFlowIds.indexOf(flow.id) >= 0;
+            });
+        } else {
+            flows = rawFlows;
+        }
+        //formatting 
+        if (flows.length === 1) {
+            content.innerText = flows[0].name;
+        } else {
+            content.innerText = "Flows";
+        }
+    });
+};
+var getFlows = function getFlows() {
+    var url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/";
+    return axios.get(url, getAxiosConfig()).then(function(response) {
+        if (response.data) {
+            rawFlows = Object.values(response.data);
+        }
+    }).catch(function(error) {
+        content.innerText = "Error fetching flows";
+    });
+};
+var getUserMe = function getUserMe() {
+    var url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "users/user/me";
+    return axios.get(url, getAxiosConfig()).then(function(response) {
+        if (!response.data) return;
+        userProfile = response.data;
+        var flowIds = userProfile && userProfile.properties && userProfile.properties.favoriteFlows;
+        if (!Array.isArray(flowIds)) return;
+        favoriteFlowIds = flowIds;
+    }).catch(function(error) {
+        content.innerText = "Error fetching favorites";
+    });
+};
+var executeFlow = function executeFlow(flowId) {
+    var url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/";
+    url = url + flowId + "/trigger";
+    axios.post(url, null, getAxiosConfig()).then(function(response) {
+        console.log("Response Status", response.status);
+    });
+};
+var content = document.getElementById("mainContent");
+var patToken = null;
+var cloudId = null;
+var flows = [];
+var rawFlows = [];
+var userProfile;
+var favoriteFlowIds = [];
+var isFavoritesOnly = false;
+var URL_TEMPLATE = "https://{{cloudId}}.connect.athom.com/api/manager/";
+content.onclick = onClick; //setup the click handler
+stio.ready(function(data) {
+    console.log("stio library is ready with token", data.settings.token);
+    if (data.settings.token == null) {
+        content.innerText = "Please configure the tile";
+        return;
+    } else {
+        patToken = data.settings.token;
+        cloudId = data.settings.homeyCloudId;
+        isFavoritesOnly = !!data.settings.isFavoritesOnly;
+    }
+    content.innerText = "Loading...";
+    getData();
+});
 </script>

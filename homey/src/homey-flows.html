@@ -15,14 +15,20 @@
 -->
 <!-- Do not edit below -->
 <script type="application/json" id="tile-settings">
-    {
-      "schema": "0.1.0",
-      "settings": [
-        {"label": "Token", "type": "STRING", "name": "token"},
-        {"name": "homeyCloudId", "label": "Homey Cloud ID", "type": "STRING"}
-      ],
-      "name": "Homey Flows"
-    }
+  {
+    "schema": "0.1.0",
+    "settings": [
+      {"name": "token", "label": "Token", "type": "STRING"},
+      {"name": "homeyCloudId", "label": "Homey Cloud ID", "type": "STRING"},
+      {
+        "name": "isFavoritesOnly",
+        "label": "Only Show Favorites",
+        "type": "BOOLEAN",
+        "default": false
+      }
+    ],
+    "name": "Homey Flows"
+  }
 </script>
 <!-- Do not edit above -->
 <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
@@ -42,76 +48,118 @@
     }
 </style>
 <script>
-    var content = document.getElementById("mainContent");
-    var patToken = null;
-    var cloudId = null;
-    var flows = [];
-    var URL_TEMPLATE = "https://{{cloudId}}.connect.athom.com/api/manager/";
+  var content = document.getElementById("mainContent");
+  var patToken = null;
+  var cloudId = null;
+  var flows = [];
+  var rawFlows = [];
+  var userProfile;
+  var favoriteFlowIds = []
+  var isFavoritesOnly = false;
+  var URL_TEMPLATE = "https://{{cloudId}}.connect.athom.com/api/manager/";
+    
+
+  content.onclick = onClick; //setup the click handler
+
+  function getAxiosConfig(){
+    return { "headers": { "Authorization": "Bearer " + patToken } }
+  }
+
+  stio.ready((data)=>{
+      console.log("stio library is ready with token", data.settings.token);
+      if(data.settings.token == null){
+        content.innerText = "Please configure the tile";
+        return;
+      }
+      else{
+        patToken = data.settings.token;
+        cloudId = data.settings.homeyCloudId;
+        isFavoritesOnly = !!data.settings.isFavoritesOnly;
+      }
       
-    
-    content.onclick = onClick; //setup the click handler
-    
-    function getAxiosConfig(){
-      return { "headers": { "Authorization": "Bearer " + patToken } }
+      content.innerText = "Loading...";
+      getData();
+  });
+
+  function onClick(){
+      if(flows.length === 1){
+        //execute the one flow we have
+        executeFlow(flows[0].flowId);
+      }
+      else{
+        var list = {title: "Flows", items: []};
+        //build the list from the flows array
+        flows.forEach(function(flow){
+            list.items.push({label: flow.name, value: flow.id});
+        });
+        //show the list
+        stio.showList(list).then(function(picked){
+            //if the user picked something, then execute that flow
+            if(picked){ executeFlow(picked); }
+        });
+      }
+  }
+
+  function getData(){
+    var promises = [getFlows()]
+    if(isFavoritesOnly){
+      promises.push(getUserMe())
     }
-    
-    stio.ready((data)=>{
-       console.log("stio library is ready with token", data.settings.token);
-       if(data.settings.token == null){
-          content.innerText = "Please configure the tile";
-          return;
-       }
-       else{
-          patToken = data.settings.token;
-          cloudId = data.settings.homeyCloudId;
-       }
-       
-       content.innerText = "Loading...";
-       getFlows();
+    Promise.all(promises).then(function(promiseResults){
+      if(isFavoritesOnly){
+        flows = rawFlows.filter(function(flow){
+          return favoriteFlowIds.indexOf(flow.id) >= 0;
+        })
+      }
+      else{
+        flows = rawFlows;
+      }
+
+      //formatting 
+      if(flows.length === 1){
+          content.innerText = flows[0].name;
+        }
+        else{
+          content.innerText = 'Flows';
+        }
+    })
+  }
+
+  function getFlows(){
+    let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/"
+    return axios.get(url, getAxiosConfig()).then(function(response){
+      if(response.data){
+        rawFlows = Object.values(response.data);
+      }
+    }).catch(function(error){
+      content.innerText = 'Error fetching flows'
     });
-    
-    function onClick(){
-       if(flows.length === 1){
-         //execute the one flow we have
-         executeFlow(flows[0].flowId);
-       }
-       else{
-          var list = {title: "Flows", items: []};
-          //build the list from the flows array
-          flows.forEach(function(flow){
-             list.items.push({label: flow.name, value: flow.id});
-          });
-          //show the list
-          stio.showList(list).then(function(picked){
-             //if the user picked something, then execute that flow
-             if(picked){ executeFlow(picked); }
-          });
-       }
-    }
-    
-    function getFlows(){
-      let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/"
-      axios.get(url, getAxiosConfig()).then(function(response){
-       if(response.data){
-         flows = Object.values(response.data);
-         if(flows.length === 1){
-            content.innerText = flows[0].name;
-         }
-         else{
-            content.innerText = 'Flows';
-         }
-       }
-      }).catch(function(error){
-       content.innerText = 'Error fetching flows'
-      });
-    }
-    
-    function executeFlow(flowId){
-      let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/"
-      url = url + flowId + "/trigger"
-      axios.post(url, null, getAxiosConfig())
-         .then(function(response){
-           console.log('Response Status', response.status);
-         });
-    }
+  }
+
+  function getUserMe(){
+    let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "users/user/me"
+    return axios.get(url, getAxiosConfig()).then(function(response){
+      if(!response.data)
+        return;
+      userProfile = response.data;
+      var flowIds = userProfile && userProfile.properties && userProfile.properties.favoriteFlows
+
+      if(!Array.isArray(flowIds))
+        return
+
+      favoriteFlowIds = flowIds;
+    }).catch(function(error){
+      content.innerText = 'Error fetching favorites'
+    });
+
+  }
+
+  function executeFlow(flowId){
+    let url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/"
+    url = url + flowId + "/trigger"
+    axios.post(url, null, getAxiosConfig())
+        .then(function(response){
+          console.log('Response Status', response.status);
+        });
+  }
 </script>

@@ -7,8 +7,18 @@
 </script>
 <!-- Do not edit above -->
 <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #user-image { height: 100%; width: 100%; object-fit: cover; }
+html,
+body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+#user-image {
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+}
 </style>
 
 <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
@@ -56,13 +66,13 @@ function _ts_generator(thisArg, body) {
         trys: [],
         ops: []
     };
-    return(g = {
+    return g = {
         next: verb(0),
         "throw": verb(1),
         "return": verb(2)
     }, typeof Symbol === "function" && (g[Symbol.iterator] = function() {
         return this;
-    }), g);
+    }), g;
     function verb(n) {
         return function(v) {
             return step([
@@ -181,7 +191,7 @@ function parseUrlSample() {
     if (sampleUrl.indexOf(baseDomain) < 0) showError("Please use valid sample Homey URL");
     if (type === "pat") {
         //try to parse out the various parts of the URL we need with a regular expression
-        var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-e0-9\-]+)/;
+        var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-f0-9\-]+)/;
         var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
         if (Array.isArray(match) && match.length >= 2) {
             //pass the parsed settings back into the top-level variable
@@ -226,8 +236,11 @@ stio.ready(function(data) {
     //and initialize the tile
     init();
 });
-var getBaseUrl = function() {
-    var _ref = _async_to_generator(function() {
+function getBaseUrl() {
+    return _getBaseUrl.apply(this, arguments);
+}
+function _getBaseUrl() {
+    _getBaseUrl = _async_to_generator(function() {
         var address, _response_data_ethernetAddress, re, matches, ip, dashedIp;
         return _ts_generator(this, function(_state) {
             switch(_state.label){
@@ -268,12 +281,13 @@ var getBaseUrl = function() {
             }
         });
     });
-    return function getBaseUrl() {
-        return _ref.apply(this, arguments);
-    };
-}();
-var initializeApi = function() {
-    var _ref = _async_to_generator(function() {
+    return _getBaseUrl.apply(this, arguments);
+}
+function initializeApi() {
+    return _initializeApi.apply(this, arguments);
+}
+function _initializeApi() {
+    _initializeApi = _async_to_generator(function() {
         var address, user, homey, systemInfo;
         return _ts_generator(this, function(_state) {
             switch(_state.label){
@@ -345,12 +359,13 @@ var initializeApi = function() {
             }
         });
     });
-    return function initializeApi() {
-        return _ref.apply(this, arguments);
-    };
-}();
-var getDeviceValue = function() {
-    var _ref = _async_to_generator(function() {
+    return _initializeApi.apply(this, arguments);
+}
+function getDeviceValue() {
+    return _getDeviceValue.apply(this, arguments);
+}
+function _getDeviceValue() {
+    _getDeviceValue = _async_to_generator(function() {
         var device, url, path;
         return _ts_generator(this, function(_state) {
             switch(_state.label){
@@ -376,10 +391,8 @@ var getDeviceValue = function() {
             }
         });
     });
-    return function getDeviceValue() {
-        return _ref.apply(this, arguments);
-    };
-}();
+    return _getDeviceValue.apply(this, arguments);
+}
 function valuePollingScheduler() {
     getDeviceValue();
     console.log("polling value in 5 minutes");

@@ -65,7 +65,7 @@
     });
   }
   
-  const getBaseUrl = async () => {
+  async function getBaseUrl(){
     let address;
     if(tileSettings.patConfigApproach === "manual")
       address = tileSettings.localIp
@@ -83,7 +83,7 @@
     return; //nothing to return if it's bad
 	}
 
-  let initializeApi = async () => {
+  async function initializeApi(){
     if(tileSettings.apiType === "pat"){
       //query the API via cloud proxy to get the local IP address and then use that to connect
       let address = await getBaseUrl();
@@ -145,7 +145,7 @@
 
     if(type === "pat"){
       //try to parse out the various parts of the URL we need with a regular expression
-      let re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-e0-9\-]+)/
+      let re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-f0-9\-]+)/
       var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
       if(Array.isArray(match) && match.length >= 2){
         //pass the parsed settings back into the top-level variable
@@ -189,7 +189,7 @@
     chart = new google.visualization.Gauge(document.getElementById('chart'));
   }
   
-  let getDeviceValue = async () => {  
+  async function getDeviceValue(){  
     let device = await homeyApi.devices.getDevice({id: tileSettings.deviceId})
     let value = device.capabilitiesObj[tileSettings.capabilityId].value
     console.log(`Received ${tileSettings.capabilityId} reading: ${value}`);

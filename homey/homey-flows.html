@@ -73,11 +73,18 @@ var getData = function getData() {
     }
     Promise.all(promises).then(function(promiseResults) {
         if (isFavoritesOnly) {
-            flows = rawFlows.filter(function(flow) {
-                return favoriteFlowIds.indexOf(flow.id) >= 0;
+            flows = favoriteFlowIds.map(function(id) {
+                return rawFlows[id];
+            }).filter(function(f) {
+                return f != null;
             });
         } else {
-            flows = rawFlows;
+            flows = Object.values(rawFlows).sort(function(a, b) {
+                var _b, _a_name, _a;
+                return (_a = a) === null || _a === void 0 ? void 0 : (_a_name = _a.name) === null || _a_name === void 0 ? void 0 : _a_name.localeCompare((_b = b) === null || _b === void 0 ? void 0 : _b.name, undefined, {
+                    sensitivity: "base"
+                });
+            });
         }
         //formatting 
         if (flows.length === 1) {
@@ -85,16 +92,20 @@ var getData = function getData() {
         } else {
             content.innerText = "Flows";
         }
+    }).catch(function(error) {
+        console.warn("Error in getData. Probably caught earlier", error.message);
     });
 };
 var getFlows = function getFlows() {
     var url = URL_TEMPLATE.replace("{{cloudId}}", cloudId) + "flow/flow/";
     return axios.get(url, getAxiosConfig()).then(function(response) {
         if (response.data) {
-            rawFlows = Object.values(response.data);
+            rawFlows = response.data;
         }
     }).catch(function(error) {
+        console.error("Error fetching flows", error);
         content.innerText = "Error fetching flows";
+        throw error; //rethrow the error so the caller doesn't continue
     });
 };
 var getUserMe = function getUserMe() {
@@ -106,7 +117,9 @@ var getUserMe = function getUserMe() {
         if (!Array.isArray(flowIds)) return;
         favoriteFlowIds = flowIds;
     }).catch(function(error) {
+        console.error("Error fetching favorites", error);
         content.innerText = "Error fetching favorites";
+        throw error; //rethrow the error so the caller doesn't continue
     });
 };
 var executeFlow = function executeFlow(flowId) {
@@ -120,7 +133,7 @@ var content = document.getElementById("mainContent");
 var patToken = null;
 var cloudId = null;
 var flows = [];
-var rawFlows = [];
+var rawFlows = {};
 var userProfile;
 var favoriteFlowIds = [];
 var isFavoritesOnly = false;

@@ -1,24 +1,24 @@
 <script type="application/json" id="tile-settings">
     {
       "schema": "0.1.0",
-      "settings": [{"name":"apiType","label":"API Type","type":"ENUM","values":[{"value":"pat","label":"API Key"},{"value":"homeyInk","label":"Homey Ink Token"}]},{"name":"patToken","label":"API Token","type":"STRING","showIf":["apiType","==","pat"]},{"name":"patConfigApproach","label":"Configuration Approach","type":"ENUM","values":[{"value":"urlSample","label":"URL Sample"},{"value":"manual","label":"Manual"}],"showIf":["apiType","==","pat"]},{"name":"localIp","label":"Homey Local IP","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"homeyUrlSample","label":"Homey Sample URL","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"urlSample"}]},{"name":"homeyInkUrlSample","label":"Homey Ink Sample URL","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"deviceIdPat","label":"Device ID","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"deviceId","label":"Device ID","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"capabilityId","label":"Capability ID","type":"STRING","showIf":["apiType","!=",null]}],
+      "settings": [{"name":"apiType","label":"API Type","type":"ENUM","values":[{"value":"pat","label":"API Key"},{"value":"homeyInk","label":"Homey Ink Token"}]},{"name":"patToken","label":"API Token","type":"STRING","showIf":["apiType","==","pat"]},{"name":"patConfigApproach","label":"Configuration Approach","type":"ENUM","values":[{"value":"urlSample","label":"URL Sample"},{"value":"manual","label":"Manual"}],"showIf":["apiType","==","pat"]},{"name":"localIp","label":"Homey Local IP","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"homeyUrlSample","label":"Homey Sample URL","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"urlSample"}]},{"name":"homeyInkUrlSample","label":"Homey Ink Sample URL","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"deviceIdPat","label":"Device ID","type":"STRING","showIf":[{"property":"apiType","operator":"==","value":"pat"},{"property":"patConfigApproach","operator":"==","value":"manual"}]},{"name":"deviceId","label":"Device ID","type":"STRING","showIf":["apiType","==","homeyInk"]},{"name":"capabilityId","label":"Capability ID (optional)","type":"STRING","showIf":["apiType","!=",null]}],
       "name": "Homey Image Display"
     }
 </script>
 <!-- Do not edit above -->
 <style>
-html,
-body {
+    html,
+    body {
     height: 100%;
     margin: 0;
     padding: 0;
-}
+    }
 
-#user-image {
+    #user-image {
     height: 100%;
     width: 100%;
     object-fit: cover;
-}
+    }
 </style>
 
 <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
@@ -141,261 +141,261 @@ function _ts_generator(thisArg, body) {
                 e
             ];
             y = 0;
-        } finally{
-            f = t = 0;
-        }
-        if (op[0] & 5) throw op[1];
-        return {
-            value: op[0] ? op[1] : void 0,
-            done: true
-        };
-    }
-}
-var init = function init() {
-    //parse the relevant settings out of the urlSample
-    parseUrlSample();
-    if (tileSettings.deviceId == null || tileSettings.deviceId == "") {
-        return showError("Device ID is not set");
-    }
-    //if we got this far, it seems like we have a valid configuration, so lets initialize the API
-    initializeApi().then(function() {
-        console.log("API has been initialized.");
-        //make a call to Homey to get some data
-        valuePollingScheduler();
-    });
-};
-var showError = //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
-function showError(message) {
-    console.error(message);
-    stio.showToast(message, "red");
-    document.getElementById("chart").innerHTML = "Error";
-};
-var parseUrlSample = //parse out the various components from a provided Sample URL
-function parseUrlSample() {
-    //determine which type of URL we are going to sample
-    var type = tileSettings.apiType //pat | homeyInk
-    ;
-    var sampleUrl, baseDomain = "my.homey.app";
-    //determine the type of URL we will sample (if any)
-    if (type === "pat" && tileSettings.patConfigApproach !== "urlSample") return; //exit early if we don't need to parse the URL
-    else if (type === "pat") {
-        sampleUrl = tileSettings.homeyUrlSample;
-        baseDomain = "my.homey.app";
-    } else if (type === "homeyInk") {
-        sampleUrl = tileSettings.homeyInkUrlSample;
-        baseDomain = "app.homey.ink";
-    }
-    //if no URL was provided, let the user know
-    if (sampleUrl == null || sampleUrl === "") showError("No Sample URL was provided. Please configure the tile.");
-    //if the api isn't the cloud API, let the user know
-    if (sampleUrl.indexOf(baseDomain) < 0) showError("Please use valid sample Homey URL");
-    if (type === "pat") {
-        //try to parse out the various parts of the URL we need with a regular expression
-        var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-f0-9\-]+)/;
-        var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
-        if (Array.isArray(match) && match.length >= 2) {
-            //pass the parsed settings back into the top-level variable
-            try {
-                tileSettings.cloudId = match[1];
-                tileSettings.deviceId = match[2];
-            } catch (error) {
-                showError("Unable to parse Cloud ID and Device ID from sample URL.");
+            } finally{
+                f = t = 0;
             }
-        }
-    } else if (type === "homeyInk") {
-        //try to parse out the various parts of the URL we need with a regular expression
-        var re1 = /https:\/\/app\.homey\.ink\/\?theme=web&token=([^&]+)/;
-        var match = sampleUrl.match(re1); //array of the various regex matches (0: full string, 1: token)
-        if (Array.isArray(match) && match.length >= 1) {
-            //pass the parsed settings back into the top-level variable
-            try {
-                apiSettings.token = JSON.parse(atob(decodeURIComponent(match[1])));
-                console.log("Successfully parsed Homey Ink token.");
-            } catch (error) {
-                showError("Unable to parse token from sample URL");
-            }
+            if (op[0] & 5) throw op[1];
+            return {
+                value: op[0] ? op[1] : void 0,
+                done: true
+            };
         }
     }
-};
-var getAxiosConfig = //helper function to format the token into an axios 'data' object to attach the token as a parameter
-function getAxiosConfig() {
-    return {
-        headers: {
-            "Authorization": "Bearer ".concat(tileSettings.patToken)
+    var init = function init() {
+        //parse the relevant settings out of the urlSample
+        parseUrlSample();
+        if (tileSettings.deviceId == null || tileSettings.deviceId == "") {
+            return showError("Device ID is not set");
+        }
+        //if we got this far, it seems like we have a valid configuration, so lets initialize the API
+        initializeApi().then(function() {
+            console.log("API has been initialized.");
+            //make a call to Homey to get some data
+            valuePollingScheduler();
+        });
+    };
+    var showError = //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
+    function showError(message) {
+        console.error(message);
+        stio.showToast(message, "red");
+        document.getElementById("chart").innerHTML = "Error";
+    };
+    var parseUrlSample = //parse out the various components from a provided Sample URL
+    function parseUrlSample() {
+        //determine which type of URL we are going to sample
+        var type = tileSettings.apiType //pat | homeyInk
+        ;
+        var sampleUrl, baseDomain = "my.homey.app";
+        //determine the type of URL we will sample (if any)
+        if (type === "pat" && tileSettings.patConfigApproach !== "urlSample") return; //exit early if we don't need to parse the URL
+        else if (type === "pat") {
+            sampleUrl = tileSettings.homeyUrlSample;
+            baseDomain = "my.homey.app";
+        } else if (type === "homeyInk") {
+            sampleUrl = tileSettings.homeyInkUrlSample;
+            baseDomain = "app.homey.ink";
+        }
+        //if no URL was provided, let the user know
+        if (sampleUrl == null || sampleUrl === "") showError("No Sample URL was provided. Please configure the tile.");
+        //if the api isn't the cloud API, let the user know
+        if (sampleUrl.indexOf(baseDomain) < 0) showError("Please use valid sample Homey URL");
+        if (type === "pat") {
+            //try to parse out the various parts of the URL we need with a regular expression
+            var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/(?:devices\/)?([a-f0-9\-]+)/;
+            var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
+            if (Array.isArray(match) && match.length >= 2) {
+                //pass the parsed settings back into the top-level variable
+                try {
+                    tileSettings.cloudId = match[1];
+                    tileSettings.deviceId = match[2];
+                } catch (error) {
+                    showError("Unable to parse Cloud ID and Device ID from sample URL.");
+                }
+            }
+        } else if (type === "homeyInk") {
+            //try to parse out the various parts of the URL we need with a regular expression
+            var re1 = /https:\/\/app\.homey\.ink\/\?theme=web&token=([^&]+)/;
+            var match = sampleUrl.match(re1); //array of the various regex matches (0: full string, 1: token)
+            if (Array.isArray(match) && match.length >= 1) {
+                //pass the parsed settings back into the top-level variable
+                try {
+                    apiSettings.token = JSON.parse(atob(decodeURIComponent(match[1])));
+                    console.log("Successfully parsed Homey Ink token.");
+                } catch (error) {
+                    showError("Unable to parse token from sample URL");
+                }
+            }
         }
     };
-};
-var tileSettings = {};
-var apiSettings = {};
-var cloudApi; //this will get initialized with a valid configuration
-var homeyApi; //same regarding initialization
-var imgEl = document.getElementById("user-image");
-stio.ready(function(data) {
-    //get the settings from the callback
-    tileSettings = data.settings; //urlSample, deviceId, gaugeLabel
-    //and initialize the tile
-    init();
-});
-function getBaseUrl() {
-    return _getBaseUrl.apply(this, arguments);
-}
-function _getBaseUrl() {
-    _getBaseUrl = _async_to_generator(function() {
-        var address, _response_data_ethernetAddress, re, matches, ip, dashedIp;
-        return _ts_generator(this, function(_state) {
-            switch(_state.label){
-                case 0:
-                    if (!(tileSettings.patConfigApproach === "manual")) return [
-                        3,
-                        1
-                    ];
-                    address = tileSettings.localIp;
-                    return [
-                        3,
-                        3
-                    ];
-                case 1:
-                    return [
-                        4,
-                        axios.get("https://".concat(tileSettings.cloudId, ".connect.athom.com/api/manager/system/"), getAxiosConfig()).then(function(response) {
-                            return (_response_data_ethernetAddress = response.data.ethernetAddress) !== null && _response_data_ethernetAddress !== void 0 ? _response_data_ethernetAddress : response.data.wifiAddress;
-                        })
-                    ];
-                case 2:
-                    address = _state.sent();
-                    _state.label = 3;
-                case 3:
-                    re = /^.*?((?:\d+\.){3}\d+).*$/;
-                    matches = address.match(re);
-                    if (Array.isArray(matches) && matches.length > 1) {
-                        ip = matches[1];
-                        dashedIp = ip.split(".").join("-");
-                        return [
-                            2,
-                            "https://".concat(dashedIp, ".homey.homeylocal.com")
+    var getAxiosConfig = //helper function to format the token into an axios 'data' object to attach the token as a parameter
+    function getAxiosConfig() {
+        return {
+            headers: {
+                "Authorization": "Bearer ".concat(tileSettings.patToken)
+            }
+        };
+    };
+    var tileSettings = {};
+    var apiSettings = {};
+    var cloudApi; //this will get initialized with a valid configuration
+    var homeyApi; //same regarding initialization
+    var imgEl = document.getElementById("user-image");
+    stio.ready(function(data) {
+        //get the settings from the callback
+        tileSettings = data.settings; //urlSample, deviceId, gaugeLabel
+        //and initialize the tile
+        init();
+    });
+    function getBaseUrl() {
+        return _getBaseUrl.apply(this, arguments);
+    }
+    function _getBaseUrl() {
+        _getBaseUrl = _async_to_generator(function() {
+            var address, _response_data_ethernetAddress, re, matches, ip, dashedIp;
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        if (!(tileSettings.patConfigApproach === "manual")) return [
+                            3,
+                            1
                         ];
-                    }
-                    return [
-                        2
-                    ]; //nothing to return if it's bad
-            }
+                        address = tileSettings.localIp;
+                        return [
+                            3,
+                            3
+                        ];
+                    case 1:
+                        return [
+                            4,
+                            axios.get("https://".concat(tileSettings.cloudId, ".connect.athom.com/api/manager/system/"), getAxiosConfig()).then(function(response) {
+                                return (_response_data_ethernetAddress = response.data.ethernetAddress) !== null && _response_data_ethernetAddress !== void 0 ? _response_data_ethernetAddress : response.data.wifiAddress;
+                            })
+                        ];
+                    case 2:
+                        address = _state.sent();
+                        _state.label = 3;
+                    case 3:
+                        re = /^.*?((?:\d+\.){3}\d+).*$/;
+                        matches = address.match(re);
+                        if (Array.isArray(matches) && matches.length > 1) {
+                            ip = matches[1];
+                            dashedIp = ip.split(".").join("-");
+                            return [
+                                2,
+                                "https://".concat(dashedIp, ".homey.homeylocal.com")
+                            ];
+                        }
+                        return [
+                            2
+                        ]; //nothing to return if it's bad
+                }
+            });
         });
-    });
-    return _getBaseUrl.apply(this, arguments);
-}
-function initializeApi() {
-    return _initializeApi.apply(this, arguments);
-}
-function _initializeApi() {
-    _initializeApi = _async_to_generator(function() {
-        var address, user, homey, systemInfo;
-        return _ts_generator(this, function(_state) {
-            switch(_state.label){
-                case 0:
-                    if (!(tileSettings.apiType === "pat")) return [
-                        3,
-                        3
-                    ];
-                    return [
-                        4,
-                        getBaseUrl()
-                    ];
-                case 1:
-                    address = _state.sent();
-                    return [
-                        4,
-                        HomeyAPI.createLocalAPI({
-                            address: address,
-                            token: tileSettings.patToken
-                        })
-                    ];
-                case 2:
-                    homeyApi = _state.sent();
-                    return [
-                        3,
-                        8
-                    ];
-                case 3:
-                    if (!(tileSettings.apiType === "homeyInk")) return [
-                        3,
-                        8
-                    ];
-                    cloudApi = new AthomCloudAPI({
-                        clientId: "5cbb504da1fc782009f52e46",
-                        clientSecret: "gvhs0gebgir8vz8yo2l0jfb49u9xzzhrkuo1uvs8",
-                        token: new AthomCloudAPI.Token(apiSettings.token)
-                    });
-                    return [
-                        4,
-                        cloudApi.getAuthenticatedUser()
-                    ];
-                case 4:
-                    user = _state.sent();
-                    return [
-                        4,
-                        user.getFirstHomey()
-                    ];
-                case 5:
-                    homey = _state.sent();
-                    return [
-                        4,
-                        homey.authenticate()
-                    ];
-                case 6:
-                    // Create a session on this Homey
-                    homeyApi = _state.sent();
-                    return [
-                        4,
-                        homeyApi.system.getInfo()
-                    ];
-                case 7:
-                    systemInfo = _state.sent();
-                    tileSettings.cloudId = systemInfo.cloudId;
-                    _state.label = 8;
-                case 8:
-                    return [
-                        2
-                    ];
-            }
+        return _getBaseUrl.apply(this, arguments);
+    }
+    function initializeApi() {
+        return _initializeApi.apply(this, arguments);
+    }
+    function _initializeApi() {
+        _initializeApi = _async_to_generator(function() {
+            var address, user, homey, systemInfo;
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        if (!(tileSettings.apiType === "pat")) return [
+                            3,
+                            3
+                        ];
+                        return [
+                            4,
+                            getBaseUrl()
+                        ];
+                    case 1:
+                        address = _state.sent();
+                        return [
+                            4,
+                            HomeyAPI.createLocalAPI({
+                                address: address,
+                                token: tileSettings.patToken
+                            })
+                        ];
+                    case 2:
+                        homeyApi = _state.sent();
+                        return [
+                            3,
+                            8
+                        ];
+                    case 3:
+                        if (!(tileSettings.apiType === "homeyInk")) return [
+                            3,
+                            8
+                        ];
+                        cloudApi = new AthomCloudAPI({
+                            clientId: "5cbb504da1fc782009f52e46",
+                            clientSecret: "gvhs0gebgir8vz8yo2l0jfb49u9xzzhrkuo1uvs8",
+                            token: new AthomCloudAPI.Token(apiSettings.token)
+                        });
+                        return [
+                            4,
+                            cloudApi.getAuthenticatedUser()
+                        ];
+                    case 4:
+                        user = _state.sent();
+                        return [
+                            4,
+                            user.getFirstHomey()
+                        ];
+                    case 5:
+                        homey = _state.sent();
+                        return [
+                            4,
+                            homey.authenticate()
+                        ];
+                    case 6:
+                        // Create a session on this Homey
+                        homeyApi = _state.sent();
+                        return [
+                            4,
+                            homeyApi.system.getInfo()
+                        ];
+                    case 7:
+                        systemInfo = _state.sent();
+                        tileSettings.cloudId = systemInfo.cloudId;
+                        _state.label = 8;
+                    case 8:
+                        return [
+                            2
+                        ];
+                }
+            });
         });
-    });
-    return _initializeApi.apply(this, arguments);
-}
-function getDeviceValue() {
-    return _getDeviceValue.apply(this, arguments);
-}
-function _getDeviceValue() {
-    _getDeviceValue = _async_to_generator(function() {
-        var device, url, path;
-        return _ts_generator(this, function(_state) {
-            switch(_state.label){
-                case 0:
-                    return [
-                        4,
-                        homeyApi.devices.getDevice({
-                            id: tileSettings.deviceId
-                        })
-                    ];
-                case 1:
-                    device = _state.sent();
-                    if (tileSettings.capabilityId != "" && device.capabilitiesObj[tileSettings.capabilityId]) url = device.capabilitiesObj[tileSettings.capabilityId].value;
-                    else if (device.images.length > 0) {
-                        path = device.images[0].imageObj.url;
-                        url = "https://".concat(tileSettings.cloudId, ".connect.athom.com") + path;
-                    }
-                    console.log("Received ".concat(tileSettings.capabilityId, " reading: ").concat(url));
-                    imgEl.src = url;
-                    return [
-                        2
-                    ];
-            }
+        return _initializeApi.apply(this, arguments);
+    }
+    function getDeviceValue() {
+        return _getDeviceValue.apply(this, arguments);
+    }
+    function _getDeviceValue() {
+        _getDeviceValue = _async_to_generator(function() {
+            var device, url, path;
+            return _ts_generator(this, function(_state) {
+                switch(_state.label){
+                    case 0:
+                        return [
+                            4,
+                            homeyApi.devices.getDevice({
+                                id: tileSettings.deviceId
+                            })
+                        ];
+                    case 1:
+                        device = _state.sent();
+                        if (tileSettings.capabilityId != "" && device.capabilitiesObj[tileSettings.capabilityId]) url = device.capabilitiesObj[tileSettings.capabilityId].value;
+                        else if (device.images.length > 0) {
+                            path = device.images[0].imageObj.url;
+                            url = "https://".concat(tileSettings.cloudId, ".connect.athom.com") + path;
+                        }
+                        console.log("Received ".concat(tileSettings.capabilityId, " reading: ").concat(url));
+                        imgEl.src = url;
+                        return [
+                            2
+                        ];
+                }
+            });
         });
-    });
-    return _getDeviceValue.apply(this, arguments);
-}
-function valuePollingScheduler() {
-    getDeviceValue();
-    console.log("polling value in 5 minutes");
-    setTimeout(valuePollingScheduler, 300000);
-}
-</script>
+        return _getDeviceValue.apply(this, arguments);
+    }
+    function valuePollingScheduler() {
+        getDeviceValue();
+        console.log("polling value in 5 minutes");
+        setTimeout(valuePollingScheduler, 300000);
+    }
+    </script>

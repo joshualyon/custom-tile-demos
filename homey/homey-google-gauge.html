@@ -182,7 +182,7 @@ function parseUrlSample() {
     if (sampleUrl.indexOf(baseDomain) < 0) showError("Please use valid sample Homey URL");
     if (type === "pat") {
         //try to parse out the various parts of the URL we need with a regular expression
-        var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/devices\/([a-f0-9\-]+)/;
+        var re = /https:\/\/my\.homey\.app\/homeys\/([a-z0-9]+)\/(?:devices\/)?([a-f0-9\-]+)/;
         var match = sampleUrl.match(re); //array of the various regex matches (0: full string, 1: cloudId, 2: deviceId)
         if (Array.isArray(match) && match.length >= 2) {
             //pass the parsed settings back into the top-level variable

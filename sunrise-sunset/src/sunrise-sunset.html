@@ -1,0 +1,142 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+    {
+      "schema": "0.1.0",
+      "settings": [
+        {
+          "name": "showSunrise",
+          "label": "Show Sunrise",
+          "type": "BOOLEAN",
+          "default": true
+        },
+        {
+          "name": "showSunset",
+          "label": "Show Sunset",
+          "type": "BOOLEAN",
+          "default": true
+        },
+        {
+          "name": "location",
+          "label": "Location (latitude,longitude)",
+          "type": "STRING",
+          "default": "33,-97"
+        }
+      ]
+    }
+    </script>
+    <!-- Do not edit above -->
+    <div id="main-content">
+      <div id="sunrise">
+        <div class="label">Sunrise</div>
+        <div class="value"></div>
+      </div>
+      <div id="sunset">
+        <div class="label">Sunrise</div>
+        <div class="value"></div>
+      </div>
+    </div>
+    <div class="error"></div>
+    
+    <style>
+      html { height: 100% }
+      body { 
+        font-size: min(10vh, 10vw);
+        height: calc(100% - 1em); 
+        margin: 0; 
+        padding: 0.5em; 
+       }
+      #main-content {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly;
+        align-items: center;
+      }
+      #sunrise .value, #sunset .value {
+        font-size: 2em;
+      }
+      #sunrise .label, #sunset .label {
+        margin-bottom: -0.5em;
+      }
+      .error { 
+        position: absolute; top: 0; left: 0; right: 0; 
+        display: none; 
+        background: #cf0606;
+        font-size: 0.8em;
+        padding: 0.25em;
+      }
+    </style>
+    
+    <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+    <script>
+      let baseUrl = 'https://api.open-meteo.com/v1/forecast?latitude={{LATITUDE}}&longitude={{LONGITUDE}}&daily=sunrise,sunset&timezone=auto'
+      let sunrise,
+          sunset,
+          strSunrise = '',
+          strSunset = '';
+    
+      let sunriseEl = document.querySelector('#sunrise > .value')
+      let sunsetEl = document.querySelector('#sunset > .value')
+    
+      let errorEl = document.querySelector(".error")
+    
+      let geo = {
+        lat: "33",
+        lon: "-97"
+      }
+    
+      stio.ready(data => {
+        if(data.settings.showSunrise === false)
+          document.getElementById("sunrise").style.display = 'none'
+        if(data.settings.showSunset === false)
+          document.getElementById("sunset").style.display = 'none'
+    
+        if(data.settings.showSunrise === false &&
+           data.settings.showSunset === false)
+          return showError('Must show at least Sunrise or Sunset')
+    
+        let location = data.settings.location;
+        if(location == null || location == "")
+          return showError('Invalid location setting.')
+        
+        let [lat,lon] = location.split(",");
+        if(lat == null || lon == null){
+          return showError('Invalid location setting.')
+        }
+        
+        geo = {lat, lon}
+        getTimes().then(()=>{
+          //every 4 hours
+          const INTERVAL = 4 * 60 * 60 * 1000;
+          setInterval(getTimes, INTERVAL)
+        }).catch(error=> {
+          showError(`Error retriving time: ${error.message}`)
+        })
+      
+      })
+    
+      function showError(err){
+        errorEl.innerText = err;
+        errorEl.style.display = 'block';
+      }
+    
+      async function getTimes(){
+        let url = baseUrl.replace('{{LATITUDE}}', geo.lat).replace('{{LONGITUDE}}', geo.lon)
+        const response = await fetch(url);
+          const data = await response.json();
+    
+        sunrise = data.daily.sunrise[0]
+        sunset = data.daily.sunset[0]
+    
+        let dtSunrise = new Date(sunrise);
+        let dtSunset = new Date(sunset);
+    
+        strSunrise = dtSunrise.toLocaleTimeString([], {timeStyle: 'short'});
+        strSunset = dtSunset.toLocaleTimeString([], {timeStyle: 'short'});
+    
+        sunriseEl.innerText = strSunrise;
+        sunsetEl.innerText = strSunset;
+      }
+      
+    </script>

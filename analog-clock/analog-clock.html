@@ -1,240 +1,239 @@
 <!-- Do not edit below -->
 <script type="application/json" id="tile-settings">
     {"schema": "0.1.0", "settings": [], "name": "Analog Clock"}
-    </script>
-    <!-- Do not edit above -->
-    <div class="clock ios7">
-      <div class="hours-container">
-        <div class="hours"></div>
-      </div>
-      <div class="minutes-container">
-        <div class="minutes"></div>
-      </div>
-      <div class="seconds-container">
-        <div class="seconds"></div>
-      </div>
-    </div>
-    
-    
-    <style>
-      html, body { 
-        margin: 0; 
-        padding: 0; 
-        background: transparent;
-        height: 100%;
-      }
-      /* center the clock in non-square tiles */
-      body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      :root {
-        --size: 100vmin; /* smaller of the viewport height or width */
-      }
-      .clock {
-        border-radius: 50%;
-        background: #fff url(https://cdn.sharptools.io/images/ios_clock.svg) no-repeat center;
-        background-size: 88%;
-        height: var(--size);
-        /* padding-bottom: 31%; */
-        position: relative;
-        width: var(--size);
-      }
-      
-      .clock.simple:after {
-        background: #000;
-        border-radius: 50%;
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        width: 5%;
-        height: 5%;
-        z-index: 10;
-      }
-      
-      .minutes-container, .hours-container, .seconds-container {
-        position: absolute;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 0;
-      }
-      
-      .hours {
-        background: #000;
-        height: 20%;
-        left: 48.75%;
-        position: absolute;
-        top: 30%;
-        transform-origin: 50% 100%;
-        width: 2.5%;
-      }
-      
-      .minutes {
-        background: #000;
-        height: 40%;
-        left: 49%;
-        position: absolute;
-        top: 10%;
-        transform-origin: 50% 100%;
-        width: 2%;
-      }
-      
-      .seconds {
-        background: red;
-        height: 45%;
-        left: 49.5%;
-        position: absolute;
-        top: 14%;
-        transform-origin: 50% 80%;
-        width: 1%;
-        z-index: 8;
-      }
-    
-        @keyframes rotate {
-        100% {
-          transform: rotateZ(360deg);
-        }
-      }
-    
-      .hours-container {
-        animation: rotate 43200s infinite linear;
-      }
-      .minutes {
-        transition: transform 0.3s cubic-bezier(.4,2.08,.55,.44);
-      }
-      .seconds {
-        transition: transform 0.2s cubic-bezier(.4,2.08,.55,.44);
-      }
-    
-    
-      /* iOS 7 style */
-      .clock.ios7:before {
-        background: black;
-        border-radius: 50%;
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        -webkit-transform: translate(-50%, -50%);
-        transform: translate(-50%, -50%);
-        width: 6%;
-        height: 6%;
-        z-index:0
-      }
-      
-      .clock.ios7:after {
-          width: 2%;
-          height:2%
-      }
-      .clock.ios7 .seconds {
-        border-radius: 200%/10%;
-        height: 30%;
-        left: 49.5%;
-        top: 20%;
-        width: 1%;
-        -webkit-transform-origin: 50% 100%;
-        transform-origin:50% 100%
-      }
-      
-      .clock.ios7 .minutes {
-          border-radius: 150%/10%;
-          width: 2%;
-          height: 35%;
-          left: 49%;
-          top: 15%;
-          -webkit-transform-origin: 50% 100%;
-          transform-origin:50% 100%
-      }
-      
-      .clock.ios7 .hours {
-          border-radius: 85%/10%;
-          width: 2%;
-          height: 20%;
-          left: 49%;
-          top: 30%;
-          -webkit-transform-origin: 50% 100%;
-          transform-origin:50% 100%
-      }
-    </style>
-    
-    
-    <script>
-      /*
-      * Starts clock using the user's local time
-      * Based on: cssanimation.rocks/clocks
-      * With updates to better keep time and sync and handle wrap-around transition animations
-      */
-    function updateClock() {
-      // Get the local time using JS
-      var date = new Date;
-      var seconds = date.getSeconds();
-      var minutes = date.getMinutes();
-      var hours = date.getHours();
-    
-      // Create an object with each hand and it's angle in degrees
-      var hands = [
-        {
-          hand: 'hours',
-          angle: (hours * 30) + (minutes / 2)
-        },
-        {
-          hand: 'minutes',
-          angle: (minutes * 6)
-        },
-        {
-          hand: 'seconds',
-          angle: (seconds * 6)
-        }
-      ];
-      // Loop through each of these hands to set their angle
-      for (var j = 0; j < hands.length; j++) {
-        //alias the hand and angle for easier reference
-        var hand = hands[j].hand; 
-        var angle = hands[j].angle;
-        
-        //get the element associated with the clock hand
-        var element = document.querySelector('.' + hand);
-    
-        //grab the last angle and also update it (not )
-        var lastAngle = element.getAttribute("data-last-angle")
-        element.setAttribute('data-last-angle', angle);
-    
-        //if we are wrapping around 360 -> 0 
-        //(we have to avoid some weird animations going from 360 -> 0 with a large spin around the clock)
-        if(angle === 0){
-            //temporarily set the position to 360 to let the animation occur
-            element.style.webkitTransform = 'rotateZ(360deg)';
-            element.style.transform = 'rotateZ(360deg)';
-    
-              setTimeout(function(){
-                  //then snapshot and disable the animation	temporarily
-                var transition = element.style.transition;
-                //temporarily disable the transition
-                element.style.transition = 'none';
-    
-                //update the position to 0 to wrap
-                element.style.webkitTransform = 'rotateZ(0deg)';
-                element.style.transform = 'rotateZ(0deg)';
-              
-                // Force a reflow to ensure the transition is truly skipped
-                  element.offsetWidth;
-                //then re-enable the transition
-                element.style.transition = transition;
-            }, 500) //animations are 300ms or less
-        }else{
-          //update the position normally
-          element.style.webkitTransform = 'rotateZ('+ angle +'deg)';
-          element.style.transform = 'rotateZ('+ angle +'deg)';
-        }
-      }
+</script>
+<!-- Do not edit above -->
+<div class="clock ios7">
+  <div class="hours-container">
+    <div class="hours"></div>
+  </div>
+  <div class="minutes-container">
+    <div class="minutes"></div>
+  </div>
+  <div class="seconds-container">
+    <div class="seconds"></div>
+  </div>
+</div>
+
+
+<style>
+  html, body { 
+    margin: 0; 
+    padding: 0; 
+    background: transparent;
+    height: 100%;
+  }
+  /* center the clock in non-square tiles */
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :root {
+    --size: 100vmin; /* smaller of the viewport height or width */
+  }
+  .clock {
+    border-radius: 50%;
+    background: #fff url(https://cdn.sharptools.io/images/ios_clock.svg) no-repeat center;
+    background-size: 88%;
+    height: var(--size);
+    /* padding-bottom: 31%; */
+    position: relative;
+    width: var(--size);
+  }
+  
+  .clock.simple:after {
+    background: #000;
+    border-radius: 50%;
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 5%;
+    height: 5%;
+    z-index: 10;
+  }
+  
+  .minutes-container, .hours-container, .seconds-container {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+  }
+  
+  .hours {
+    background: #000;
+    height: 20%;
+    left: 48.75%;
+    position: absolute;
+    top: 30%;
+    transform-origin: 50% 100%;
+    width: 2.5%;
+  }
+  
+  .minutes {
+    background: #000;
+    height: 40%;
+    left: 49%;
+    position: absolute;
+    top: 10%;
+    transform-origin: 50% 100%;
+    width: 2%;
+  }
+  
+  .seconds {
+    background: red;
+    height: 45%;
+    left: 49.5%;
+    position: absolute;
+    top: 14%;
+    transform-origin: 50% 80%;
+    width: 1%;
+    z-index: 8;
+  }
+
+    @keyframes rotate {
+    100% {
+      transform: rotateZ(360deg);
     }
+  }
+
+  .hours-container {
+    transition: transform 0.3s linear;
+  }
+  .minutes {
+    transition: transform 0.3s cubic-bezier(.4,2.08,.55,.44);
+  }
+  .seconds {
+    transition: transform 0.2s cubic-bezier(.4,2.08,.55,.44);
+  }
+
+
+  /* iOS 7 style */
+  .clock.ios7:before {
+    background: black;
+    border-radius: 50%;
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    -webkit-transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%);
+    width: 6%;
+    height: 6%;
+    z-index:0
+  }
+  
+  .clock.ios7:after {
+      width: 2%;
+      height:2%
+  }
+  .clock.ios7 .seconds {
+    border-radius: 200%/10%;
+    height: 30%;
+    left: 49.5%;
+    top: 20%;
+    width: 1%;
+    -webkit-transform-origin: 50% 100%;
+    transform-origin:50% 100%
+  }
+  
+  .clock.ios7 .minutes {
+      border-radius: 150%/10%;
+      width: 2%;
+      height: 35%;
+      left: 49%;
+      top: 15%;
+      -webkit-transform-origin: 50% 100%;
+      transform-origin:50% 100%
+  }
+  
+  .clock.ios7 .hours {
+      border-radius: 85%/10%;
+      width: 2%;
+      height: 20%;
+      left: 49%;
+      top: 30%;
+      -webkit-transform-origin: 50% 100%;
+      transform-origin:50% 100%
+  }
+</style>
+
+
+<script>
+  /*
+  * Starts clock using the user's local time
+  * Based on: cssanimation.rocks/clocks
+  * With updates to better keep time and sync and handle wrap-around transition animations
+  */
+function updateClock() {
+  // Get the local time using JS
+  var date = new Date;
+  var seconds = date.getSeconds();
+  var minutes = date.getMinutes();
+  var hours = date.getHours();
+
+  // Create an object with each hand and it's angle in degrees
+  var hands = [
+    {
+      hand: 'hours',
+      angle: (hours * 30) + (minutes / 2)
+    },
+    {
+      hand: 'minutes',
+      angle: (minutes * 6)
+    },
+    {
+      hand: 'seconds',
+      angle: (seconds * 6)
+    }
+  ];
+  // Loop through each of these hands to set their angle
+  for (var j = 0; j < hands.length; j++) {
+    //alias the hand and angle for easier reference
+    var hand = hands[j].hand; 
+    var angle = hands[j].angle;
     
-    //kick everything off
-    updateClock()
-    setInterval(updateClock, 1000)
-    </script>
-      
+    //get the element associated with the clock hand
+    var element = document.querySelector('.' + hand);
+
+    //grab the last angle and also update it (not )
+    var lastAngle = element.getAttribute("data-last-angle")
+    element.setAttribute('data-last-angle', angle);
+
+    //if we are wrapping around 360 -> 0 
+    //(we have to avoid some weird animations going from 360 -> 0 with a large spin around the clock)
+    if(angle === 0){
+        //temporarily set the position to 360 to let the animation occur
+        element.style.webkitTransform = 'rotateZ(360deg)';
+        element.style.transform = 'rotateZ(360deg)';
+
+          setTimeout(function(){
+              //then snapshot and disable the animation	temporarily
+            var transition = element.style.transition;
+            //temporarily disable the transition
+            element.style.transition = 'none';
+
+            //update the position to 0 to wrap
+            element.style.webkitTransform = 'rotateZ(0deg)';
+            element.style.transform = 'rotateZ(0deg)';
+          
+            // Force a reflow to ensure the transition is truly skipped
+              element.offsetWidth;
+            //then re-enable the transition
+            element.style.transition = transition;
+        }, 500) //animations are 300ms or less
+    }else{
+      //update the position normally
+      element.style.webkitTransform = 'rotateZ('+ angle +'deg)';
+      element.style.transform = 'rotateZ('+ angle +'deg)';
+    }
+  }
+}
+
+//kick everything off
+updateClock()
+setInterval(updateClock, 1000)
+</script>

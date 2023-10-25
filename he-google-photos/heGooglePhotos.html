@@ -96,7 +96,7 @@
 
   function injectImageStyle(){
     var fit = tileSettings && tileSettings.scaling || 'cover';
-    var css = `#content img, #content video { object-fit: ${fit}}`
+    var css = `#content img, #content video { object-fit: ${fit}!important}`
     injectCss(css)
   }
 
@@ -198,7 +198,7 @@
 
   function getDeviceId(){
 
-	if(_deviceId) return Promise.resolve(_deviceId);
+    if(_deviceId) return Promise.resolve(_deviceId);
     
     //if we have a device ID
     var isDeviceIdSet = (tileSettings && tileSettings.deviceId != null && tileSettings.deviceId != "");
@@ -299,7 +299,8 @@
     width: 100%;
     text-align: center; /* for error messages */
   }
-  #content img, #content video {
+  /* dkilgore 2023-10-14 update introduced wrapping div that we need to expand */
+  #content div, #content img, #content video {
     width: 100%; 
     height: 100%;
   }

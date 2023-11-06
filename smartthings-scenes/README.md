@@ -8,5 +8,6 @@ Scenes and use it for the 'token' setting in the tile. When configuring the toke
 
 ![PAT Scenes Selections](https://i.imgur.com/25MYQbh.png)
 
+> [!IMPORTANT]  
 > You can create a Personal Access Token at:  
 >   https://account.smartthings.com/tokens

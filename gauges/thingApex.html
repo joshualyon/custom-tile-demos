@@ -1,0 +1,205 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {"type": "THING", "name": "thing", "label": "Thing", "filters": {}},
+    {
+      "type": "THING:ATTRIBUTE:NAME",
+      "name": "attribute",
+      "label": "Attribute",
+      "filters": {"source": "thing"}
+    },
+    {
+      "type": "STRING",
+      "name": "chartOptions",
+      "label": "Advanced: Chart Customizations (JSON)",
+  		"default": ""
+    }
+  ],
+  "name": "Gauge Thing"
+}
+</script>
+<!-- Do not edit above -->
+<script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
+<script src="https://unpkg.com/apexcharts@3.49.0/dist/apexcharts.js"></script>
+<script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
+
+<div id="chart" class=""></div>
+
+
+
+<script>
+  //basic chart options setup
+  var options = {
+    chart: {
+      type: 'radialBar',
+      //make the foreground (font) color white to contrast a typical tile color
+      foreColor: "#FFF",
+      // make the height 100% so it fills the full tile
+      height: '100%',
+      // Enable sparkline to remove all other chart elements
+      // CRITICAL for taking up the full size of the tile
+      sparkline: {
+        enabled: true
+      }
+    },
+    //styling specific to each chart type (radial in this case)
+    plotOptions: {
+      radialBar: {
+        dataLabels: {
+          textAnchor: "end",
+          showOn: "always",
+          //name = attribute name ('labels' below)
+          name: {
+            show: true,
+            offsetY: 0, //offset to -15 if shown with the value
+            fontSize: "8vh",
+          },
+          //value = attribute value ('series' below)
+          value: {
+            show: false,
+            offsetY: 0, //use -16 if name isn't shown (to offset back to 0, so we can use relative CSS transforms), 0 if name is shown
+            fontSize: "18vh"
+          }
+        }
+      }
+    },
+    //round the end of the radial bar stroke
+    stroke: {
+      lineCap: "round"
+    },
+    //series will be dynamically updated with the attribute value
+    series: [0],
+    //labels will dynamically be updated with the attribute name
+    labels: ["loading..."],
+  }
+
+  //example user customization of options:
+  // { colors: ["#20E647"], plotOptions: { radialBar: { hollow: { margin: 0, size: "70%", background: "#293450" }, track: { dropShadow: { enabled: true, top: 2, left: 0, blur: 4, opacity: 0.15 } }, } }, fill: { type: "gradient", gradient: { shade: "dark", type: "vertical", gradientToColors: ["#87D4F9"], stops: [0, 100] } } }
+
+  //consider some sort of min/max option for non-percentage data types
+  // https://github.com/apexcharts/apexcharts.js/issues/449#issuecomment-890073837
+
+  
+  //instantiate an instance of the Apex Chart with our options
+	var chart = new ApexCharts(document.querySelector("#chart"), options);
+	chart.render();
+
+  stio.ready((data) => {
+  	let thing = data.settings.thing;
+    let attr = data.settings.attribute;
+
+    //if the user passed in chartOptions, parse those and use them as a baseline
+    let chartOptions = {}
+    try{
+      chartOptions = JSON5.parse(data.settings.chartOptions)
+    }catch(error){
+      console.error('Custom Tile::Gauge: Error parsing user supplied chartOptions', error)
+    }
+
+    //initialize the chart with the Thing attribute value and user supplied options (if provided)
+    initializeChart(thing, attr, chartOptions)
+
+    //setup a listener such that anytime the attribute value changes, we update the chart
+    thing.subscribe(attr)
+    thing.attributes[attr].onValue(value => {
+      //update the chart with the new value
+      chart.updateSeries([value])
+    })
+  });
+
+  function initializeChart(thing, attr, chartOptions={}){
+  
+    //update the chart with the thing value
+    chartOptions.series = [ thing.attributes[attr].value ]
+    
+    //if the user didn't supply a label override, use the attribute name as the default (even though we hide it by default)
+    if(!chartOptions.labels)
+    	chartOptions.labels = [ attr ]
+    
+    //if the user didn't override the 'show' value for name and value within plotOptions.radialBar.dataLabels
+    //then use our defaults to hide the name (attribute) and show the value
+    // createPath() is equivalent to setPath() with an ifNotExists=true option
+    createPath(chartOptions, "plotOptions.radialBar.dataLabels.name.show", false)
+    createPath(chartOptions, "plotOptions.radialBar.dataLabels.value.show", true)
+
+    //if the name label is shown and the value offset is unset, let's offset it by the height of the name label to reset it to 0 since we use CSS relative transforms expecting a 0 baseline
+    let dataLabelName = chartOptions.plotOptions.radialBar.dataLabels.name;
+    let dataLabelValue = chartOptions.plotOptions.radialBar.dataLabels.value;
+    if(dataLabelName.show === true && dataLabelValue.offsetY == null)
+      dataLabelValue.offsetY = -16;
+
+    //if the user didn't override the value formatter, use our default which appends the attribute's unit of measure (rather than always using '%')
+    createPath(chartOptions, "plotOptions.radialBar.dataLabels.value.formatter", (value)=> {
+      return value + thing.attributes[attr].unit
+    })
+    
+    //update the chart with the user settings as the baseline along with the Thing attribute value (and our other tweaks noted above)
+    chart.updateOptions(chartOptions)
+  }
+
+  //helper method to set a dot-path of an object to a value, stubbing the path along the way if it doesn't exist
+  //createPath() is an alias for setPath() with ifNotExists=true
+  function createPath(obj, path, value){
+    return setPath(obj, path, value, {ifNotExists: true})
+  }
+	function setPath(obj, path, value, {ifNotExists=false}={}) {
+    const keys = path.split('.');
+    const lastKey = keys.pop();
+    const targetObj = keys.reduce((acc, key) => (acc[key] = acc[key] || {}), obj);
+		
+    //if the `ifNotExists` option was passed in and the targetObj already has the property, bail early
+		if(ifNotExists && targetObj.hasOwnProperty(lastKey))    
+			return obj
+
+    //otherwise update the target path
+		targetObj[lastKey] = value;
+
+    //and return the base, modified object
+    return obj; 
+  }
+</script>
+
+
+
+<style>
+  html, body {
+    height: 100vh;
+    margin: 0;
+  }
+  #chart { 
+    height: 100%;
+  }
+  #chart svg {
+    display: block; /* SVGs are inline by default which have extra space at the bottom */
+  }
+  /* minor tweaks to the data labels */
+  /* when only the value is shown, offset it a bit so it's better centered vertically */
+  .apexcharts-datalabel-value {
+    transform: translateY(5vh); /* Adjust the value as needed */
+  }
+  /* always pull the label (name) up a bit - if the value is hidden, you might want to comment this out */
+  .apexcharts-datalabel-label {
+    transform: translateY(-10vh)
+  }
+  /* when both the label (name) and value are shown: eg. the value immediately follows the label (name) */
+  .apexcharts-datalabel-label + .apexcharts-datalabel-value {
+    transform: translateY(7.5vh); /* Adjust the value as needed */
+  }
+  
+  /* debugging helpers: add a 'debug' class to the chart div to show these outlines */
+  .debug#chart::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    border: 1px dashed red;
+    width: 100%;
+	}
+  .debug .apexcharts-datalabel-value {
+    outline: 1px dashed green;
+  }
+  .debug .apexcharts-datalabel-label {
+    outline: 1px dashed purple;
+  }
+</style>

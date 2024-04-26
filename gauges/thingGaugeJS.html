@@ -1,0 +1,317 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {"type": "THING", "name": "thing", "label": "Thing", "filters": {}},
+    {
+      "type": "THING:ATTRIBUTE:NAME",
+      "name": "attribute",
+      "label": "Attribute",
+      "filters": {"source": "thing"}
+    },
+    {
+      "type": "STRING",
+      "name": "chartOptions",
+      "label": "Advanced: Chart Customizations (JSON)",
+      "default": "{ label: false, min: 0, max: 100 }"
+    }
+  ],
+  "name": "Gauge Thing (JS)"
+}
+</script>
+<!-- Do not edit above -->
+<script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
+<script src="https://unpkg.com/gaugeJS@1.3.8/dist/gauge.min.js"></script>
+<script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
+
+<div id="chart-wrapper">
+  <div id="label">
+    <div id="value"></div>
+    <!-- <div id="units"></div> --> <!-- handle it all in the value render() for now -->
+  </div>
+	<canvas id="chart" class=""></canvas>
+  
+</div>
+
+
+<script>
+  // Element inside which you want to see the chart
+  let element = document.getElementById("chart")
+  let textField = document.getElementById("value")
+  let label = document.getElementById("label")
+  
+  var options = {
+    angle: 0, 				// The span of the gauge arc
+    lineWidth: 0.44, 	// The line thickness
+    radiusScale: 1, 	// Relative radius
+    pointer: {
+      length: 0.7, 				// Relative to gauge radius
+      strokeWidth: 0.035, // The thickness
+      color: '#FFF' 			// Fill color
+    },
+    limitMax: false,     			// If false, max value increases automatically if value > maxValue
+    limitMin: false,     			// If true, the min value of the gauge will be fixed
+    colorStart: 'rgb(33, 150, 242)', 	// Primary gauge color
+    colorStop: undefined,    					// Secondary gauge color (eg. gradient)
+    strokeColor: 'rgba(255, 255, 255, 0.1)', //track color
+    
+    highDpiSupport: true,     // High resolution support
+
+    // staticZones: [
+    //    {strokeStyle: "#F03E3E", min: 0, max: 33}, // Red from 0 to 33
+    //    {strokeStyle: "#FFDD00", min: 33, max: 66}, // Yellow
+    //    {strokeStyle: "#30B32D", min: 66, max: 100}, // Green
+    // ],
+    
+    // generateGradient: true,	//calculate the 'gradient' color between the two percentColors
+    // percentColors: [[0.0, "#43a047" ], [0.50, "#f9c802"], [1.0, "#ff0000"]],
+    label: false, //hide the label by default,
+    min: 0,
+    max: 100
+  };
+  
+  var gauge = draw()
+  
+
+  stio.ready((data) => {
+  	let thing = data.settings.thing;
+    let attr = data.settings.attribute;
+
+    //if the user passed in chartOptions, parse those and use them as a baseline
+    let chartOptions = {}
+    try{
+      chartOptions = JSON5.parse(data.settings.chartOptions)
+    }catch(error){
+      console.warn('Custom Tile::Gauge: Error parsing user supplied chartOptions')
+    }
+
+    if(!thing || !attr){
+      console.warn('Custom Tile::Gauge: thing and attribute configuration is required')
+      return;
+    }
+
+    //initialize the chart with the Thing attribute value and user supplied options (if provided)
+    initializeChart(thing, attr, chartOptions)
+
+    //setup a listener such that anytime the attribute value changes, we update the chart
+    thing.subscribe(attr);
+    thing.attributes[attr].onValue(value => {
+      //update the chart with the new value
+      gauge.set(value)
+    })
+  });
+
+  function initializeChart(thing, attr, chartOptions={}){
+    chartOptions = {...options, ...chartOptions}; //use our options as the base and layer in the user preferences
+
+    //if our custom `label` property is falsy, hide the label
+    if(chartOptions.label == false)
+      document.getElementById("label").classList.add('hide')
+    //otherwise make sure it is shown
+    else{
+      document.getElementById("label").classList.remove('hide')
+    }
+
+    //if the custom label property is a string position or object with the position, add the relevant class
+    let labelPosition = typeof chartOptions.label === 'string' ? chartOptions.label : chartOptions.label?.position;
+    if(["top", "center", "middle", "bottom"].includes(labelPosition)){
+    	//alias middle -> center
+      if(labelPosition === "middle")
+        labelPosition = "center"
+
+      //add the class
+      document.getElementById("label").classList.add(labelPosition)
+    }
+
+    //if the user didn't override the value formatter, use our default which appends the attribute's unit of measure (rather than always using '%')
+    TextRenderer.prototype.render = function(gauge){
+			this.el.innerHTML = formatNumber(gauge.displayedValue, this.fractionDigits) + thing.attributes[attr].unit;
+    }
+    
+    //update the min and max values on the gauge if supplied
+    gauge.minValue = chartOptions.min ?? 0;
+    gauge.maxValue = chartOptions.max ?? 100;
+    
+    //update the chart with our combined settings
+    gauge.setOptions(chartOptions)
+    
+    //make sure to remove the style.fontSize that gets applied automatically to the label
+    textField.style.fontSize = null;
+
+    //update the gauge value
+    gauge.set(thing.attributes[attr].value)
+  }
+
+  function formatNumber(number, digits=0) {
+    const formatter = new Intl.NumberFormat(undefined, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits
+    });
+    
+    return formatter.format(number);
+  }
+
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  function draw() {
+    //reuse the gauge instance if we already have one
+    if(gauge){
+      // console.debug('REUSING existing gauge')
+      //clear out the displayScale and the width/height settings (including internal G__* variants)
+      // so we configDisplayScale() will recalculate the scale and sizing
+      delete gauge.displayScale
+      element.removeAttribute('height')
+      element.removeAttribute('width')
+      delete element.G__width
+      delete element.G__height
+
+      //calling configDisplayScale() and render() directly isn't sufficient as 
+      // setOptions() also calculates the availableHeight, lineWidth, radius, etc.
+      // gauge.configDisplayScale().render()
+
+      //call setOptions() which calculates the necessary fields and calls render()
+      //but the first re-render causes weird issues with the pointer, so chain an
+      //update(true) to force a clean fresh render
+			gauge.setOptions(gauge.options).update(true); 
+      // remove the font-size that the setOptions applies as we want to use our CSS
+			textField.style.fontSize = ""
+    }
+    //otherwise create a new gauge if it's our first render
+    else{
+      // console.debug('CREATING new gauge')
+      gauge = new Gauge(element).setOptions(options);
+      //set a text field to be updated too
+      gauge.setTextField(textField);
+    }
+    
+
+    return gauge;
+  }
+
+  const debouncedDraw = debounce(draw, 250)
+ 	window.addEventListener('resize', debouncedDraw);
+
+  //helper method to set a dot-path of an object to a value, stubbing the path along the way if it doesn't exist
+  //createPath() is an alias for setPath() with ifNotExists=true
+  function createPath(obj, path, value){
+    return setPath(obj, path, value, {ifNotExists: true})
+  }
+	function setPath(obj, path, value, {ifNotExists=false}={}) {
+    const keys = path.split('.');
+    const lastKey = keys.pop();
+    const targetObj = keys.reduce((acc, key) => (acc[key] = acc[key] || {}), obj);
+		
+    //if the `ifNotExists` option was passed in and the targetObj already has the property, bail early
+		if(ifNotExists && targetObj.hasOwnProperty(lastKey))    
+			return obj
+
+    //otherwise update the target path
+		targetObj[lastKey] = value;
+
+    //and return the base, modified object
+    return obj; 
+  }
+</script>
+
+
+<style>
+  html, body {
+    height: 100vh;
+    width: 100vw;
+    margin: 0;
+    /* display the items in a column so we can vertically center them */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  #chart-wrapper {
+    position: relative; /* so we can position the label relative to this but pull it out of render flow */
+    font-size: 20vh; /* will cascade to the label, but allows us to use em relative units */
+  }
+  #chart { 
+    height: auto!important;
+    width: 100%!important;
+  }
+  #label {
+    position: absolute;
+    bottom: -1.1em;
+    left: 0;
+    right: 0;
+    width: 100%;
+    text-align: center; 
+  }
+  .hide {
+    display: none;
+  }
+
+  /* if the chart comes after a non-hidden label, adjust it down a bit */
+  #label:not(.hide) + #chart {
+    margin-top: -0.75em;
+  }
+
+
+  
+  /* if the user wants to center the label */
+  #label.center {
+    top: unset;
+    bottom: -0.7em; /* center it on the bottom point */
+    background: rgba(0,0,0,0.7); /* transparent black */
+    backdrop-filter: blur(5px); /* gentle backdrop blur */
+    box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.8); /* slight shadow */
+		/* reposition it horizontally center */
+    width: auto;
+    right: unset;
+    left: 50%;
+    transform: translateX(-50%);
+    /* resize it and make it square -> circle */
+    font-size: 75%;
+    width: 3em;
+    height: 3em;
+    border-radius: 50%;
+    /* center the content within it */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  /* if the chart comes after a centered label, adjust it up a bit */
+  #label.center + #chart {
+    margin-top: -0.75em;
+    margin-bottom: unset;
+  }
+
+
+  #label.top {
+    top: -1.2em;
+    bottom: unset;
+  }
+  /* if the chart comes after a bottom positioned label, adjust it up a bit more */
+  #label.top + #chart {
+    margin-bottom: -1em;
+    margin-top: unset;
+  }
+  
+  
+  /* debugging helpers: add a 'debug' class to the chart div to show these outlines */
+  .debug#chart {
+    outline: 1px dashed red;
+  }
+  .debug#chart::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    border: 1px dashed red;
+    width: 100%;
+	}
+</style>

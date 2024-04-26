@@ -1,0 +1,247 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "THING",
+      "name": "thing",
+      "label": "Thing",
+      "filters": {"capabilities": ["audioVolume"]}
+    },
+    {"type": "NUMBER", "name": "step", "label": "Step / Increment (optional)", "default": 0}
+  ],
+  "name": "Audio Range Vertical",
+  "dimensions": {"height": 2, "width": 1}
+}
+</script>
+<!-- Do not edit above -->
+
+
+<div class="full-center">
+  <div class="wrapper" id="wrapper">
+    <input id="range" type="range" min="0" max="100" value="0">
+  </div>
+  <div id="tooltip"></div>
+</div>
+
+
+<script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
+
+<script>
+  const rangeInput = document.getElementById('range');
+  const tooltip = document.getElementById('tooltip')
+  let thing, step;
+    
+  stio.ready(function(data){
+    thing = data.settings.thing;
+    step = data.settings.step;
+
+    if(!thing){
+      console.warn('CustomTile::VolumeLevel: configure the tile with a thing')
+      return;
+    }
+    
+    
+    //if we have step as a string, parse it as a number
+    if(typeof step === "string")
+      step = parseInt(step, 10)
+
+    //if it's a usable numeric value, use it as the step
+    if(step > 0 && step <= 100 && !isNaN(step))
+      rangeInput.step = step;
+    
+
+    //initialize the range with the value
+    updateRangeValue(thing.attributes['volume'].value)
+
+    //and listen for value changes
+    thing.subscribe('volume')
+    thing.attributes['volume'].onValue(updateRangeValue)
+  });
+
+  // Listener for range value changes
+  rangeInput.addEventListener('change', function() {
+      console.log('New value from user:', this.value);
+      // Send command here, e.g., sendCommand(this.value);
+			// sendVolumeCommand(this.value)
+  });
+
+  rangeInput.addEventListener('input', function(){
+    showTooltip(this.value, true)
+  })
+
+  // Listener for range cursor position (hover / touch) - went back to range 'input' for accuracy and simplicity
+  // rangeInput.addEventListener('mousemove', handleMouseMove);
+  // rangeInput.addEventListener('touchmove', handleTouchMove);
+  
+  rangeInput.addEventListener('mouseout', startFadeOutTimer);
+  rangeInput.addEventListener('touchend', startFadeOutTimer);
+  rangeInput.addEventListener('change', startFadeOutTimer);
+  
+  let fadeOutTimer;
+  
+  function handleMouseMove(event) {
+    let percent = event.offsetX / event.target.clientWidth
+    showTooltip(percent);
+  }
+  
+  function handleTouchMove(event) {
+    let percent = event.target.value / 100;
+    showTooltip(percent);
+  }
+  
+  function showTooltip(percent, raw=false) {
+    clearTimeout(fadeOutTimer);
+    tooltip.style.opacity = '1';
+  
+    const position = getPosition(percent, raw)
+  
+    const volume = raw ? percent : getExpectedRangeValue(percent);
+    
+    // console.debug(volume, rangeInput.value, (percent * 100).toFixed(3))
+  
+    tooltip.textContent = volume;
+    tooltip.style.top = `${position}px`;
+  }
+
+  function getPosition(percent, raw=false){
+    if(raw)
+      percent = percent / 100.0;
+    const rect = rangeInput.getBoundingClientRect();
+    let position = Math.round((1 - percent) * rect.height) + rect.top;
+    let tooltipPosition = Math.max(position - tooltip.clientHeight, rect.top);
+    return tooltipPosition;
+  }
+  
+  function startFadeOutTimer() {
+    fadeOutTimer = setTimeout(() => {
+      tooltip.style.opacity = '0';
+    }, 500);
+  }
+
+  
+  function getExpectedRangeValue(percent) {
+    const minValue = parseInt(rangeInput.min);
+    const maxValue = parseInt(rangeInput.max);
+    const step = parseInt(rangeInput.step);
+  
+    // If we have steps, calculate the expected step value
+    if (step) {
+      const steps = (maxValue - minValue) / step;
+      return Math.round(percent * steps) * step + minValue;
+    } else {
+      return Math.round(percent * (maxValue - minValue) + minValue);
+    }
+  }
+
+  // Function to programmatically update the range value
+  function updateRangeValue(newValue) {
+    rangeInput.value = newValue;
+    console.log('Range value updated programmatically to:', newValue);
+  }
+
+  function sendVolumeCommand(level){
+    level = parseInt(level, 10) //base 10 number (radix) to be safe
+    thing.sendCommand('setVolume', [level])
+  }
+</script>
+
+
+
+<style>
+  html, body {
+    margin: 0;
+    height: 100vh;
+  }
+  .full-center {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .full-center {
+    position: relative;
+  }
+
+  #tooltip {
+    position: absolute;
+    font-size: 13vw;
+    width: 18vw;
+    top: -30px;
+    right: 3vw;
+    /* transform: translateX(-50%); */
+    background-color: rgba(255,255,255,0.2);
+    color: #fff;
+    padding: 0.3em;
+    border-radius: 0.2em;
+    pointer-events: none;
+    /* center even if the text overflows our fixed width (eg. 100) */
+    display: flex;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 1s;
+  }
+  #tooltip.show {
+    
+  }
+  
+  /* range style */
+  .wrapper {
+    position: relative;
+    height: 90vh;
+    width: 30vw;
+    /* padding: 1rem 0; */
+  }
+  .wrapper::before, .wrapper::after {
+    /* display: none; */
+    position: absolute;
+    z-index: 99;
+    color: #fff;
+    width: 100%;
+    text-align: center;
+    font-size: 15vw;
+    line-height: 1;
+    padding: 2vh 0;
+    pointer-events: none;
+  }
+  .wrapper::before {
+    content: "+";
+  }
+  .wrapper::after {
+    content: "−";
+    bottom: 0;
+  }
+  
+  input[type=range] {
+    -webkit-appearance: none;
+    background-color: rgba(255, 255, 255, 0.2);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin: 0;
+    padding: 0;
+    width: 90vh;
+    height: 35vw;
+    transform: translate(-50%, -50%) rotate(-90deg);
+    border-radius: 10vw;
+    overflow: hidden;
+    /* cursor: row-resize; */
+    cursor: pointer;
+  }
+  input[type=range][step] {
+    background-color: transparent;
+    background-image: repeating-linear-gradient(to right, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2) calc(12.5% - 1px), #05051a 12.5%);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 0;
+    box-shadow: -20rem 0 0 20rem rgba(255, 255, 255, 0.2);
+  }
+  input[type=range]::-moz-range-thumb {
+    border: none;
+    width: 0;
+    box-shadow: -20rem 0 0 20rem rgba(255, 255, 255, 0.2);
+  }
+</style>

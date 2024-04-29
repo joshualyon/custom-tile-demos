@@ -9,7 +9,17 @@
       "label": "Thing",
       "filters": {"capabilities": ["audioVolume"]}
     },
-    {"type": "NUMBER", "name": "step", "label": "Step / Increment (optional)", "default": 0}
+    {"type": "NUMBER", "name": "step", "label": "Step / Increment (optional)"},
+    {
+      "type": "ENUM",
+      "name": "endpointLabels",
+      "label": "Endpoint Indicators",
+      "values": [
+        {"label": "None", "value": null},
+        {"label": "-/+", "value": "plusMinus"}
+      ]
+    },
+    {"type": "BOOLEAN", "name": "handle", "label": "Show Handle"}
   ],
   "name": "Audio Range Vertical",
   "dimensions": {"height": 2, "width": 1}
@@ -20,18 +30,50 @@
 
 <div class="full-center">
   <div class="wrapper" id="wrapper">
-    <input id="range" type="range" min="0" max="100" value="0">
+    <div id="range"></div>
+    <div id="tooltip"></div>
   </div>
-  <div id="tooltip"></div>
+  
 </div>
 
 
 <script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
+<script src="https://unpkg.com/range-slider-input@2"></script>
+
 
 <script>
-  const rangeInput = document.getElementById('range');
-  const tooltip = document.getElementById('tooltip')
+  const rangeEl = document.getElementById('range');
+  const tooltip = document.getElementById('tooltip');
+  const wrapperEl = document.getElementById('wrapper');
   let thing, step;
+
+  let options = {
+    min: -100,
+    max: 0,
+    step: 1,
+    value: [-50, 0],
+    thumbsDisabled: [false, true],
+    rangeSlideDisabled: true,
+    orientation: "vertical",
+    onInput([value, _fixed], isUser){
+      //skip programmatic updates
+      if(!isUser)
+        return;
+      
+      //console.debug(`value change is pending, update tooltip: ${-value}`, isUser)
+      nextTick(()=>{
+      	setTooltip(-value);
+      });
+    },
+    onThumbDragEnd(){
+      //get the released value
+      let [value, _fixed] = rangeInput.value()
+      // console.debug(`value is commited: ${-value}`)
+      sendVolumeCommand(-value);
+      startFadeOutTimer();
+    }
+  }
+  const rangeInput = rangeSlider(rangeEl, options);
     
   stio.ready(function(data){
     thing = data.settings.thing;
@@ -48,70 +90,47 @@
       step = parseInt(step, 10)
 
     //if it's a usable numeric value, use it as the step
-    if(step > 0 && step <= 100 && !isNaN(step))
-      rangeInput.step = step;
+    if(step > 0 && step <= 100 && !isNaN(step)){
+      rangeInput.step(step);
+      rangeEl.dataset.step = step;
+    }
+
+    //if the user wants to show a handle, add the class
+    if(data.settings.handle)
+      rangeEl.classList.add('handle')
+
+    //if the user wants to show the -/+ range endpoint labels, add the class
+    if(data.settings.endpointLabels)
+      wrapperEl.classList.add('endpoint-labels')
     
 
     //initialize the range with the value
-    updateRangeValue(thing.attributes['volume'].value)
+    setRangeValue(thing.attributes['volume'].value)
 
     //and listen for value changes
     thing.subscribe('volume')
-    thing.attributes['volume'].onValue(updateRangeValue)
+    thing.attributes['volume'].onValue(setRangeValue)
   });
-
-  // Listener for range value changes
-  rangeInput.addEventListener('change', function() {
-      console.log('New value from user:', this.value);
-      // Send command here, e.g., sendCommand(this.value);
-      sendVolumeCommand(this.value)
-  });
-
-  rangeInput.addEventListener('input', function(){
-    showTooltip(this.value, true)
-  })
-
-  // Listener for range cursor position (hover / touch) - went back to range 'input' for accuracy and simplicity
-  // rangeInput.addEventListener('mousemove', handleMouseMove);
-  // rangeInput.addEventListener('touchmove', handleTouchMove);
   
-  rangeInput.addEventListener('mouseout', startFadeOutTimer);
-  rangeInput.addEventListener('touchend', startFadeOutTimer);
-  rangeInput.addEventListener('change', startFadeOutTimer);
   
   let fadeOutTimer;
   
-  function handleMouseMove(event) {
-    let percent = event.offsetX / event.target.clientWidth
-    showTooltip(percent);
-  }
-  
-  function handleTouchMove(event) {
-    let percent = event.target.value / 100;
-    showTooltip(percent);
-  }
-  
-  function showTooltip(percent, raw=false) {
+  function setTooltip(value) {
     clearTimeout(fadeOutTimer);
     tooltip.style.opacity = '1';
-  
-    const position = getPosition(percent, raw)
-  
-    const volume = raw ? percent : getExpectedRangeValue(percent);
-    
-    // console.debug(volume, rangeInput.value, (percent * 100).toFixed(3))
-  
-    tooltip.textContent = volume;
-    tooltip.style.top = `${position}px`;
-  }
 
-  function getPosition(percent, raw=false){
-    if(raw)
-      percent = percent / 100.0;
-    const rect = rangeInput.getBoundingClientRect();
-    let position = Math.round((1 - percent) * rect.height) + rect.top;
-    let tooltipPosition = Math.max(position - tooltip.clientHeight, rect.top);
-    return tooltipPosition;
+    //get the percentage positioning from the range
+    let percentTop = parseInt(rangeEl.querySelector('.range-slider__range').style.top, 10)
+    let TOOLTIP_HEIGHT = tooltip.getBoundingClientRect().height;
+    let RANGE_HEIGHT = rangeEl.getBoundingClientRect().height;
+    let TOOLTIP_PERCENT = Math.round((TOOLTIP_HEIGHT / RANGE_HEIGHT) * 100)
+    let MAX_TOP = 100 - TOOLTIP_PERCENT;
+    
+    //clamp it to the slider space
+    let position = Math.min(percentTop, MAX_TOP)
+  
+    tooltip.textContent = value;
+    tooltip.style.top = `${position}%`;
   }
   
   function startFadeOutTimer() {
@@ -120,31 +139,24 @@
     }, 500);
   }
 
-  
-  function getExpectedRangeValue(percent) {
-    const minValue = parseInt(rangeInput.min);
-    const maxValue = parseInt(rangeInput.max);
-    const step = parseInt(rangeInput.step);
-  
-    // If we have steps, calculate the expected step value
-    if (step) {
-      const steps = (maxValue - minValue) / step;
-      return Math.round(percent * steps) * step + minValue;
-    } else {
-      return Math.round(percent * (maxValue - minValue) + minValue);
-    }
-  }
-
   // Function to programmatically update the range value
-  function updateRangeValue(newValue) {
-    rangeInput.value = newValue;
-    console.log('Range value updated programmatically to:', newValue);
+  function setRangeValue(newValue) {
+    rangeInput.value([-newValue, 0]);
+    // console.log('Range value updated programmatically to:', newValue);
   }
 
   function sendVolumeCommand(level){
     level = parseInt(level, 10) //base 10 number (radix) to be safe
     thing.sendCommand('setVolume', [level])
   }
+
+  function nextTick(callback){
+    if (typeof window.queueMicrotask === 'function') {
+      window.queueMicrotask(callback);
+    } else {
+      Promise.resolve().then(callback);
+    }
+  };
 </script>
 
 
@@ -170,7 +182,7 @@
     font-size: 13vw;
     width: 18vw;
     top: -30px;
-    right: 3vw;
+    left: 38vw;
     /* transform: translateX(-50%); */
     background-color: rgba(255,255,255,0.2);
     color: #fff;
@@ -191,10 +203,10 @@
   .wrapper {
     position: relative;
     height: 90vh;
-    width: 30vw;
+    width: 35vw;
     /* padding: 1rem 0; */
   }
-  .wrapper::before, .wrapper::after {
+  .wrapper.endpoint-labels::before, .wrapper.endpoint-labels::after {
     /* display: none; */
     position: absolute;
     z-index: 99;
@@ -206,42 +218,66 @@
     padding: 2vh 0;
     pointer-events: none;
   }
-  .wrapper::before {
+  .wrapper.endpoint-labels::before {
     content: "+";
   }
-  .wrapper::after {
+  .wrapper.endpoint-labels::after {
     content: "−";
     bottom: 0;
   }
-  
-  input[type=range] {
-    -webkit-appearance: none;
-    background-color: rgba(255, 255, 255, 0.2);
+
+  .range-slider[data-vertical] {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    margin: 0;
-    padding: 0;
-    width: 90vh;
-    height: 35vw;
-    transform: translate(-50%, -50%) rotate(-90deg);
+    background-color: rgba(255, 255, 255, 0.2);
+    height: 90vh;
+    width: 35vw;
+    /* transform: rotate(-180deg); */
     border-radius: 10vw;
+    /* outline: 1px dashed red;
+    outline-offset: -1px; */
     overflow: hidden;
-    /* cursor: row-resize; */
-    cursor: pointer;
   }
-  input[type=range][step] {
+  .range-slider .range-slider__range {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 0 0 10vw 10vw;
+  }
+
+  /* Lower and Upper are inverted since we use inverted values (bottom to top) */
+  /* 0 height rather than display:hidden so the colored range takes the full space */
+  .range-slider .range-slider__thumb[data-lower] {
+    height: 0px;
+  }
+  .range-slider .range-slider__thumb[data-upper] {
+      height: 0px; 
+  }
+
+  /* if we want to display a thumb */
+  .range-slider.handle .range-slider__thumb[data-lower] {
+    /* CSS for lower thumb */
+    height: 5%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.2) 50%, transparent 50%);
+    width: 100%;
+    border-radius: 0;
+    /* outline: 1px dashed red;
+    outline-offset: -1px; */
+    
+  }
+  .range-slider.handle .range-slider__thumb[data-lower]::after {
+    /* CSS for lower thumb */
+    display: block;
+    position: relative;
+    content: " ";
+    height: 0.5vh;
+    width: 40%;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 0.25vh;
+    transform: translate(-50%, 2vh);
+    left: 50%;
+  }
+  
+
+  .range-slider[data-step] {
     background-color: transparent;
-    background-image: repeating-linear-gradient(to right, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2) calc(12.5% - 1px), #05051a 12.5%);
-  }
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 0;
-    box-shadow: -20rem 0 0 20rem rgba(255, 255, 255, 0.2);
-  }
-  input[type=range]::-moz-range-thumb {
-    border: none;
-    width: 0;
-    box-shadow: -20rem 0 0 20rem rgba(255, 255, 255, 0.2);
+    background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2) calc(12.5% - 1px), #05051a 12.5%);
   }
 </style>

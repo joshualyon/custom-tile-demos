@@ -1,0 +1,489 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "ENUM",
+      "name": "thingType",
+      "label": "Thing Type",
+      "values": [
+        {"label": "Audio Volume", "value": "audioVolume"},
+        {"label": "Switch Level", "value": "switchLevel"},
+        {"label": "Custom", "value": "custom"}
+      ],
+      "default": "switchLevel"
+    },
+    {
+      "type": "THING",
+      "name": "audioThing",
+      "label": "Thing",
+      "filters": {"capabilities": ["audioVolume"]},
+      "showIf": ["thingType", "==", "audioVolume"]
+    },
+    {
+      "type": "THING",
+      "name": "levelThing",
+      "label": "Thing",
+      "filters": {"capabilities": ["switchLevel"]},
+      "showIf": ["thingType", "==", "switchLevel"]
+    },
+    {
+      "type": "THING",
+      "name": "customThing",
+      "label": "Thing",
+      "filters": {"capabilities": []},
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "THING:ATTRIBUTE:NAME",
+      "name": "customAttribute",
+      "label": "Custom Attribute",
+      "filters": {"source": "customThing"},
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "STRING",
+      "name": "customCommand",
+      "label": "Custom Command",
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "STRING",
+      "name": "range",
+      "label": "Range (min-max)",
+      "default": "0-100"
+    },
+    {
+      "type": "NUMBER",
+      "name": "step",
+      "label": "Step / Increment (optional)",
+      "default": 0
+    },
+    {
+      "type": "ENUM",
+      "name": "endpointLabels",
+      "label": "Endpoint Indicators",
+      "values": [
+        {"label": "None", "value": null},
+        {"label": "-/+", "value": "plusMinus"}
+      ],
+  		"default": "plusMinus"
+    },
+    {"type": "BOOLEAN", "name": "handle", "label": "Show Handle"}
+  ],
+  "name": "Vertical Range Input",
+  "dimensions": {"height": 2, "width": 1}
+}
+</script>
+<!-- Do not edit above -->
+
+
+<div class="full-center">
+  <div class="wrapper" id="wrapper">
+    <div id="range"></div>
+    <div id="tooltip"></div>
+  </div>
+</div>
+<div id="error"></div>
+
+
+<script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
+<script src="https://unpkg.com/range-slider-input@2"></script>
+
+
+<script>
+  const rangeEl = document.getElementById('range');
+  const tooltip = document.getElementById('tooltip');
+  const wrapperEl = document.getElementById('wrapper');
+
+  let MIN=0, MAX=100, thingType, thing, attribute, command, step;
+
+  let INVERT = true;
+  let VALUE_COMPLEMENT = false;
+
+  let options = {
+    min: INVERT ? -MAX : MIN,
+    max: INVERT ? -MIN : MAX,
+    step: 1,
+    value: INVERT ? [-50, -MIN] : [MIN, 50],
+    thumbsDisabled: INVERT ? [false, true] : [true, false],
+    rangeSlideDisabled: true,
+    orientation: "vertical",
+    onInput([v1, v2], isUser){
+      let value = INVERT ? -v1 : v2;
+
+      if(VALUE_COMPLEMENT)
+        value = getComplement(value, MIN, MAX);
+      
+      //skip programmatic updates
+      if(!isUser)
+        return;
+      
+      // console.debug(`value change is pending, update tooltip: ${value}`, isUser)
+      nextTick(()=>{
+      	setTooltip(value);
+      });
+    },
+    onThumbDragEnd(){
+      //get the released value
+      let [v1, v2] = rangeInput.value()
+      let value = INVERT ? -v1 : v2;
+      if(VALUE_COMPLEMENT)
+        value = getComplement(value);
+      
+      // console.debug(`value is commited: ${value}`)
+      sendCommand(value);
+      startFadeOutTimer();
+    }
+  }
+  const rangeInput = rangeSlider(rangeEl, options);
+    
+  stio.ready(function(data){
+		thingType = data.settings.thingType;
+    
+    if(thingType === 'audioVolume'){
+      thing = data.settings.audioThing
+      attribute = "volume"
+      command = "setVolume"
+    }
+    else if (thingType === 'switchLevel'){
+      thing = data.settings.levelThing
+      attribute = "level"
+      command = "setLevel"
+    }
+    else if(thingType === 'custom'){
+      thing = data.settings.customThing
+      attribute = data.settings.customAttribute;
+      command = data.settings.customCommand;
+    }
+
+    //invert shade level for a nice effect (top-down)
+    if(['shadeLevel', 'windowShadeTiltLevel'].includes(attribute)){
+      INVERT = false;
+  		VALUE_COMPLEMENT = true;
+      //set the thumbs according to the inversion
+      let thumbs = INVERT ? [false, true] : [true, false]
+      rangeInput.thumbsDisabled(thumbs)
+    }
+    
+    //alias the step setting for easy reference
+    step = data.settings.step;
+
+    if(!thing){
+      showError('Configure the tile with a thing')
+      return;
+    }
+    
+    
+    //if we have step as a string, parse it as a number
+    if(typeof step === "string")
+      step = parseInt(step, 10)
+
+    //if it's a usable numeric value, use it as the step
+    if(step > 0 && step <= 100 && !isNaN(step)){
+      rangeInput.step(step);
+      rangeEl.dataset.step = step;
+    }
+
+    //if the user wants to show a handle, add the class
+    if(data.settings.handle)
+      rangeEl.classList.add('handle')
+
+    //if it's an INVERSION, update the wrapper class accordingly
+    if(INVERT)
+    	wrapperEl.classList.add('inverted')
+
+    //if the user wants to show the -/+ range endpoint labels, add the class
+    if(data.settings.endpointLabels)
+      wrapperEl.classList.add('endpoint-labels')
+
+    //adjust the min and max accordingly
+    if(parseRange(data.settings.range)){
+      if(INVERT){
+        rangeInput.max(-MIN)
+        rangeInput.min(-MAX)
+      }
+      else{
+        rangeInput.min(MIN);
+        rangeInput.max(MAX);
+      }
+    }
+    
+
+    //initialize the range with the value
+    let value = thing.attributes[attribute].value;
+    if(value != null)
+    	setRangeValue(value)
+
+    //and listen for value changes
+    thing.subscribe(attribute)
+    thing.attributes[attribute].onValue(setRangeValue)
+  });
+
+  function showError(message){
+    console.warn('CustomTile::VerticalRangeInput:', message)
+    document.getElementById('error').innerText = message;
+    document.getElementById('error').classList.add('show')
+    rangeInput.disabled()
+  }
+
+  function parseRange(range){
+    if(typeof range === 'string'){
+      const regex = /(-?\d+)\s*-\s*(-?\d+)/;
+      const match = range.match(regex);
+    
+      if (match) {
+        MIN = parseInt(match[1], 10);
+        MAX = parseInt(match[2], 10);
+        return true;
+      } else {
+        throw new Error('Invalid input format. Expected: "min - max"');
+      }
+    }
+    return false;
+  }
+
+  
+
+  function getComplement(value, min=MIN, max=MAX) {
+    // Scale factor for fixed-point precision
+    const scaleFactor = 10;
+
+    // Scale up the input values to work with integers
+    value *= scaleFactor;
+    min *= scaleFactor;
+    max *= scaleFactor;
+
+    // Ensure that the scaled value is within the specified range
+    if (value < min || value > max) {
+        throw new Error("Value must be between the specified min and max.");
+    }
+
+    // Calculate the percentage of the range that 'value' represents
+    const percentOfRange = ((value - min) / (max - min)) * 100;
+
+    // Calculate the complement percentage
+    const complementPercent = 100 - percentOfRange;
+
+    // Convert the complement percentage back to the actual scaled value in the range
+    let complementValue = min + Math.round(complementPercent * (max - min) / 100);
+
+    // Scale down and round to 1 decimal place for the final value
+    return complementValue / scaleFactor;
+	}
+  
+  
+  let fadeOutTimer;
+  
+  function setTooltip(value) {
+    clearTimeout(fadeOutTimer);
+    tooltip.style.opacity = '1';
+
+    //get the percentage positioning from the range
+    let percentTop = parseInt(rangeEl.querySelector('.range-slider__range').style.top, 10)
+    let TOOLTIP_HEIGHT = tooltip.getBoundingClientRect().height;
+    let RANGE_HEIGHT = rangeEl.getBoundingClientRect().height;
+    let TOOLTIP_PERCENT = Math.round((TOOLTIP_HEIGHT / RANGE_HEIGHT) * 100)
+    let MAX_TOP = 100 - TOOLTIP_PERCENT;
+    
+    //clamp it to the slider space
+    let position = Math.min(percentTop, MAX_TOP)
+  
+    tooltip.textContent = value;
+    tooltip.style.top = `${position}%`;
+  }
+  
+  function startFadeOutTimer() {
+    fadeOutTimer = setTimeout(() => {
+      tooltip.style.opacity = '0';
+    }, 500);
+  }
+
+  // Function to programmatically update the range value
+  function setRangeValue(newValue) {
+    // console.debug('Request received to setRangeValue:', newValue)
+    if(VALUE_COMPLEMENT)
+      newValue = getComplement(newValue)
+    
+    if(INVERT)
+    	rangeInput.value([-newValue, -MIN]);
+    else
+      rangeInput.value([MIN, newValue]);
+    // console.log('Range value updated programmatically to:', newValue, rangeInput.value());
+  }
+
+  function sendCommand(level){
+    level = parseInt(level, 10) //base 10 number (radix) to be safe
+    thing.sendCommand(command, [level])
+  }
+
+  function nextTick(callback){
+    if (typeof window.queueMicrotask === 'function') {
+      window.queueMicrotask(callback);
+    } else {
+      Promise.resolve().then(callback);
+    }
+  };
+</script>
+
+
+
+<style>
+  html, body {
+    margin: 0;
+    height: 100vh;
+  }
+
+	#error {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: #d30909;
+    padding: 0.3em 0.5em;
+    color: white;
+  }
+  #error.show {
+    display: block;
+  }
+  
+  .full-center {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .full-center {
+    position: relative;
+  }
+
+  #tooltip {
+    position: absolute;
+    font-size: 13vw;
+    width: 18vw;
+    top: -30px;
+    left: 38vw;
+    /* transform: translateX(-50%); */
+    background-color: rgba(255,255,255,0.2);
+    color: #fff;
+    padding: 0.3em;
+    border-radius: 0.2em;
+    pointer-events: none;
+    /* center even if the text overflows our fixed width (eg. 100) */
+    display: flex;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 1s;
+  }
+  #tooltip.show {
+    
+  }
+  
+  /* range style */
+  .wrapper {
+    position: relative;
+    height: 90vh;
+    width: 35vw;
+    /* padding: 1rem 0; */
+  }
+  .wrapper.endpoint-labels::before, .wrapper.endpoint-labels::after {
+    /* display: none; */
+    position: absolute;
+    z-index: 99;
+    color: #fff;
+    width: 100%;
+    text-align: center;
+    font-size: 15vw;
+    line-height: 1;
+    padding: 2vh 0;
+    pointer-events: none;
+  }
+  .wrapper.endpoint-labels::before {
+    content: "+";
+  }
+  .wrapper.endpoint-labels::after {
+    content: "−";
+    bottom: 0;
+  }
+
+  .range-slider[data-vertical] {
+    position: absolute;
+    background-color: rgba(255, 255, 255, 0.2);
+    height: 90vh;
+    width: 35vw;
+    /* transform: rotate(-180deg); */
+    border-radius: 10vw;
+    /* outline: 1px dashed red;
+    outline-offset: -1px; */
+    overflow: hidden;
+  }
+  .range-slider .range-slider__range {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 10vw 10vw 0 0;
+  }
+  .inverted .range-slider .range-slider__range {
+    border-radius: 0 0 10vw 10vw;
+  }
+  
+
+  /* Lower and Upper are inverted since we use inverted values (bottom to top) */
+  /* 0 height rather than display:hidden so the colored range takes the full space */
+  .range-slider .range-slider__thumb[data-lower] {
+    height: 0px;
+  }
+  .range-slider .range-slider__thumb[data-upper] {
+    height: 0px; 
+  }
+
+  /* if we want to display a thumb */
+  .range-slider.handle .range-slider__thumb {
+    height: 5%;
+    width: 100%;
+    border-radius: 0;
+    /* outline: 1px dashed red;
+    outline-offset: -1px; */
+    
+  }
+  .range-slider.handle .range-slider__thumb::after {
+    display: none;
+    position: relative;
+    content: " ";
+    height: 0.5vh;
+    width: 40%;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 0.25vh;
+    transform: translate(-50%, 2vh);
+    left: 50%;
+  }
+
+  /* For INVERTED thumbs */
+  .inverted .range-slider.handle .range-slider__thumb[data-lower]{
+    background: linear-gradient(180deg, rgba(255,255,255,0.2) 50%, transparent 50%);
+  }
+  .inverted .range-slider.handle .range-slider__thumb[data-lower]::after {
+    display: block;
+  }
+  .inverted .range-slider.handle .range-slider__thumb[data-upper]{
+    height: 0px;
+  }
+
+	/* For NOT INVERTED (REGULAR) thumbs */
+	:not(.inverted) .range-slider.handle .range-slider__thumb[data-upper] {
+    background: linear-gradient(180deg, transparent 50%, rgba(255,255,255,0.2) 50%);
+  }
+  :not(.inverted) .range-slider.handle .range-slider__thumb[data-upper]::after {
+    display: block;
+  }
+  :not(.inverted) .range-slider.handle .range-slider__thumb[data-lower] {
+    height: 0px;
+  }
+  
+
+  .range-slider[data-step] {
+    background-color: transparent;
+    background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2) calc(12.5% - 1px), #05051a 12.5%);
+  }
+</style>

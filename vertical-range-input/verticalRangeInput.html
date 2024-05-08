@@ -1,82 +1,25 @@
-<!-- Do not edit below -->
-<script type="application/json" id="tile-settings">
-{
-  "schema": "0.2.0",
-  "settings": [
-    {
-      "type": "ENUM",
-      "name": "thingType",
-      "label": "Thing Type",
-      "values": [
-        {"label": "Audio Volume", "value": "audioVolume"},
-        {"label": "Switch Level", "value": "switchLevel"},
-        {"label": "Custom", "value": "custom"}
-      ],
-      "default": "switchLevel"
-    },
-    {
-      "type": "THING",
-      "name": "audioThing",
-      "label": "Thing",
-      "filters": {"capabilities": ["audioVolume"]},
-      "showIf": ["thingType", "==", "audioVolume"]
-    },
-    {
-      "type": "THING",
-      "name": "levelThing",
-      "label": "Thing",
-      "filters": {"capabilities": ["switchLevel"]},
-      "showIf": ["thingType", "==", "switchLevel"]
-    },
-    {
-      "type": "THING",
-      "name": "customThing",
-      "label": "Thing",
-      "filters": {"capabilities": []},
-      "showIf": ["thingType", "==", "custom"]
-    },
-    {
-      "type": "THING:ATTRIBUTE:NAME",
-      "name": "customAttribute",
-      "label": "Custom Attribute",
-      "filters": {"source": "customThing"},
-      "showIf": ["thingType", "==", "custom"]
-    },
-    {
-      "type": "STRING",
-      "name": "customCommand",
-      "label": "Custom Command",
-      "showIf": ["thingType", "==", "custom"]
-    },
-    {
-      "type": "STRING",
-      "name": "range",
-      "label": "Range (min-max)",
-      "default": "0-100"
-    },
-    {
-      "type": "NUMBER",
-      "name": "step",
-      "label": "Step / Increment (optional)",
-      "default": 0
-    },
-    {
-      "type": "ENUM",
-      "name": "endpointLabels",
-      "label": "Endpoint Indicators",
-      "values": [
-        {"label": "None", "value": null},
-        {"label": "-/+", "value": "plusMinus"}
-      ],
-  		"default": "plusMinus"
-    },
-    {"type": "BOOLEAN", "name": "handle", "label": "Show Handle"}
-  ],
-  "name": "Vertical Range Input",
-  "dimensions": {"height": 2, "width": 1}
-}
-</script>
-<!-- Do not edit above -->
+<style>
+  /* 
+   Base CSS Variable Declarations: feel free to adjust these, but note that
+    any changes saved will apply to ALL instances of this Custom Tile, so you 
+    may want to import a second copy of the tile if you want to keep the original
+    version too
+  */
+  :root {
+    --width: 35vw;
+    --height: 90vh;
+    --radius: 10vw;
+    --thumb-height: calc(var(--radius) * 2);
+    
+    --opaque-white: rgba(255,255,255,0.2);
+    --track-color: var(--opaque-white);
+    --progress-color: var(--opaque-white);
+    --font-color: #FFFFFF;
+
+    --tooltip-visibility: visible; /* visible | hidden */
+    --tooltip-horizontal: 0.96; /* 0=left, 0.5=center, 1=right */
+  }
+</style>
 
 
 <div class="full-center">
@@ -89,7 +32,8 @@
 
 
 <script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
-<script src="https://unpkg.com/range-slider-input@2"></script>
+<!-- <script src="https://unpkg.com/range-slider-input@2"></script> -->
+<script src="https://github.com/joshualyon/range-slider-input/releases/download/2.4.4-parent/rangeslider.umd.min.js"></script>
 
 
 <script>
@@ -109,6 +53,7 @@
     value: INVERT ? [-50, -MIN] : [MIN, 50],
     thumbsDisabled: INVERT ? [false, true] : [true, false],
     rangeSlideDisabled: true,
+    parent: true, //support dragging in the blank space of the parent element
     orientation: "vertical",
     onInput([v1, v2], isUser){
       let value = INVERT ? -v1 : v2;
@@ -364,12 +309,11 @@
     position: absolute;
     font-size: 13vw;
     width: 18vw;
-    top: -30px;
-    left: 38vw;
+    top: -30px; /* hidden by default */
     /* transform: translateX(-50%); */
-    background-color: rgba(255,255,255,0.2);
-    color: #fff;
-    padding: 0.3em;
+    background-color: var(--track-color);
+    color: var(--font-color);
+    padding: 4vw;
     border-radius: 0.2em;
     pointer-events: none;
     /* center even if the text overflows our fixed width (eg. 100) */
@@ -377,23 +321,23 @@
     justify-content: center;
     opacity: 0;
     transition: opacity 1s;
-  }
-  #tooltip.show {
     
+    visibility: var(--tooltip-visibility);
+    left: calc(var(--tooltip-horizontal) * (100% - 26vw)); /* fraction of the width minus the box size: 18 width + (4 padding * 2) */
   }
   
   /* range style */
   .wrapper {
     position: relative;
-    height: 90vh;
-    width: 35vw;
+    height: var(--height);
+    width: 100%;
     /* padding: 1rem 0; */
   }
   .wrapper.endpoint-labels::before, .wrapper.endpoint-labels::after {
     /* display: none; */
     position: absolute;
     z-index: 99;
-    color: #fff;
+    color: var(--font-color);
     width: 100%;
     text-align: center;
     font-size: 15vw;
@@ -411,21 +355,23 @@
 
   .range-slider[data-vertical] {
     position: absolute;
-    background-color: rgba(255, 255, 255, 0.2);
-    height: 90vh;
-    width: 35vw;
+    background-color: var(--track-color);
+    height: var(--height);
+    width: var(--width);
     /* transform: rotate(-180deg); */
-    border-radius: 10vw;
+    border-radius: var(--radius);
     /* outline: 1px dashed red;
     outline-offset: -1px; */
     overflow: hidden;
+    left: 50%;
+    transform: translateX(-50%);
   }
   .range-slider .range-slider__range {
-    background-color: rgba(255, 255, 255, 0.2);
-    border-radius: 10vw 10vw 0 0;
+    background-color: var(--progress-color);
+    border-radius: var(--radius) var(--radius) 0 0;
   }
   .inverted .range-slider .range-slider__range {
-    border-radius: 0 0 10vw 10vw;
+    border-radius: 0 0 var(--radius) var(--radius);
   }
   
 
@@ -453,7 +399,8 @@
     content: " ";
     height: 0.5vh;
     width: 40%;
-    background: rgba(255, 255, 255, 0.8);
+    background: var(--font-color);
+    opacity: 0.8;
     border-radius: 0.25vh;
     transform: translate(-50%, 2vh);
     left: 50%;
@@ -461,7 +408,7 @@
 
   /* For INVERTED thumbs */
   .inverted .range-slider.handle .range-slider__thumb[data-lower]{
-    background: linear-gradient(180deg, rgba(255,255,255,0.2) 50%, transparent 50%);
+    background: linear-gradient(180deg, var(--progress-color) 50%, transparent 50%);
   }
   .inverted .range-slider.handle .range-slider__thumb[data-lower]::after {
     display: block;
@@ -471,19 +418,101 @@
   }
 
 	/* For NOT INVERTED (REGULAR) thumbs */
-	:not(.inverted) .range-slider.handle .range-slider__thumb[data-upper] {
-    background: linear-gradient(180deg, transparent 50%, rgba(255,255,255,0.2) 50%);
+	.wrapper:not(.inverted) .range-slider.handle .range-slider__thumb[data-upper] {
+    background: linear-gradient(180deg, transparent 50%, var(--progress-color) 50%);
   }
-  :not(.inverted) .range-slider.handle .range-slider__thumb[data-upper]::after {
+  .wrapper:not(.inverted) .range-slider.handle .range-slider__thumb[data-upper]::after {
     display: block;
   }
-  :not(.inverted) .range-slider.handle .range-slider__thumb[data-lower] {
+  .wrapper:not(.inverted) .range-slider.handle .range-slider__thumb[data-lower] {
     height: 0px;
   }
   
 
   .range-slider[data-step] {
     background-color: transparent;
-    background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2) calc(12.5% - 1px), #05051a 12.5%);
+    background-image: repeating-linear-gradient(to bottom, var(--track-color), var(--track-color) calc(12.5% - 1px), #05051a 12.5%);
   }
 </style>
+
+
+
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "ENUM",
+      "name": "thingType",
+      "label": "Thing Type",
+      "values": [
+        {"label": "Audio Volume", "value": "audioVolume"},
+        {"label": "Switch Level", "value": "switchLevel"},
+        {"label": "Custom", "value": "custom"}
+      ],
+      "default": "switchLevel"
+    },
+    {
+      "type": "THING",
+      "name": "audioThing",
+      "label": "Thing",
+      "filters": {"capabilities": ["audioVolume"]},
+      "showIf": ["thingType", "==", "audioVolume"]
+    },
+    {
+      "type": "THING",
+      "name": "levelThing",
+      "label": "Thing",
+      "filters": {"capabilities": ["switchLevel"]},
+      "showIf": ["thingType", "==", "switchLevel"]
+    },
+    {
+      "type": "THING",
+      "name": "customThing",
+      "label": "Thing",
+      "filters": {"capabilities": []},
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "THING:ATTRIBUTE:NAME",
+      "name": "customAttribute",
+      "label": "Custom Attribute",
+      "filters": {"source": "customThing"},
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "STRING",
+      "name": "customCommand",
+      "label": "Custom Command",
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "STRING",
+      "name": "range",
+      "label": "Range (min-max)",
+      "default": "0-100"
+    },
+    {
+      "type": "NUMBER",
+      "name": "step",
+      "label": "Step / Increment (optional)",
+      "default": 0
+    },
+    {
+      "type": "ENUM",
+      "name": "endpointLabels",
+      "label": "Endpoint Indicators",
+      "values": [
+        {"label": "None", "value": null},
+        {"label": "-/+", "value": "plusMinus"}
+      ],
+      "default": "plusMinus"
+    },
+    {"type": "BOOLEAN", "name": "handle", "label": "Show Handle"}
+  ],
+  "name": "Vertical Range Input IMPORT",
+  "dimensions": {"height": 2, "width": 1}
+}
+</script>
+<!-- Do not edit above -->

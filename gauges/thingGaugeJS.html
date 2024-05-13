@@ -3,12 +3,36 @@
 {
   "schema": "0.2.0",
   "settings": [
-    {"type": "THING", "name": "thing", "label": "Thing", "filters": {}},
+    {
+      "type": "ENUM",
+      "name": "sourceType",
+      "label": "Source Type",
+      "values": [
+        {"label": "Thing", "value": "thing"},
+        {"label": "Variable", "value": "variable"}
+      ],
+      "default": "thing"
+    },
+    {
+      "type": "THING",
+      "name": "thing",
+      "label": "Thing",
+      "filters": {},
+      "showIf": ["sourceType", "==", "thing"]
+    },
     {
       "type": "THING:ATTRIBUTE:NAME",
       "name": "attribute",
       "label": "Attribute",
-      "filters": {"source": "thing"}
+      "filters": {"source": "thing"},
+      "showIf": ["sourceType", "==", "thing"]
+    },
+    {
+      "type": "VARIABLE",
+      "name": "variable",
+      "label": "Variable",
+      "filters": {"type": "Number"},
+      "showIf": ["sourceType", "==", "variable"]
     },
     {
       "type": "STRING",
@@ -75,8 +99,7 @@
   
 
   stio.ready((data) => {
-  	let thing = data.settings.thing;
-    let attr = data.settings.attribute;
+    let {sourceType, thing, attribute, variable} = data.settings;
 
     //if the user passed in chartOptions, parse those and use them as a baseline
     let chartOptions = {}
@@ -86,23 +109,39 @@
       console.warn('Custom Tile::Gauge: Error parsing user supplied chartOptions')
     }
 
-    if(!thing || !attr){
+    //verify the thing or variable is actually configured
+    if(sourceType === 'thing' && (!thing || !attribute)){
       console.warn('Custom Tile::Gauge: thing and attribute configuration is required')
+      return;
+    }
+    else if(sourceType === 'variable' && !variable){
+      console.warn('Custom Tile::Gauge: variable configuration is required')
       return;
     }
 
     //initialize the chart with the Thing attribute value and user supplied options (if provided)
-    initializeChart(thing, attr, chartOptions)
-
-    //setup a listener such that anytime the attribute value changes, we update the chart
-    thing.subscribe(attr);
-    thing.attributes[attr].onValue(value => {
-      //update the chart with the new value
-      gauge.set(value)
-    })
+    initializeChart(data.settings, chartOptions)
+    
+    //setup the relevant type of listener such that anytime the thing/variable value changes, we update the gauge
+    if(sourceType === "thing"){
+      //subscribe to the attribute events and setup the listener
+      thing.subscribe(attribute);
+      thing.attributes[attribute].onValue(value => {
+        gauge.set(value)
+      })
+    }
+    else if(sourceType === "variable"){
+      //setup the listener
+      variable.onValue(value => {
+        gauge.set(value);
+      })
+    }
   });
 
-  function initializeChart(thing, attr, chartOptions={}){
+  function initializeChart(settings, chartOptions={}){
+    //destructure the various settings
+    let {sourceType, thing, attribute, variable} = settings;
+    
     chartOptions = {...options, ...chartOptions}; //use our options as the base and layer in the user preferences
 
     //if our custom `label` property is falsy, hide the label
@@ -126,7 +165,8 @@
 
     //if the user didn't override the value formatter, use our default which appends the attribute's unit of measure (rather than always using '%')
     TextRenderer.prototype.render = function(gauge){
-			this.el.innerHTML = formatNumber(gauge.displayedValue, this.fractionDigits) + thing.attributes[attr].unit;
+      let unitOfMeasure = sourceType === 'thing' ? thing.attributes[attribute].unit : '';
+			this.el.innerHTML = formatNumber(gauge.displayedValue, this.fractionDigits) + unitOfMeasure;
     }
     
     //update the min and max values on the gauge if supplied
@@ -139,8 +179,9 @@
     //make sure to remove the style.fontSize that gets applied automatically to the label
     textField.style.fontSize = null;
 
-    //update the gauge value
-    gauge.set(thing.attributes[attr].value)
+    //update the gauge value based on the source type (thing or variable)
+    let value = sourceType === 'thing' ? thing.attributes[attribute].value : variable.value;
+    gauge.set(value)
   }
 
   function formatNumber(number, digits=0) {

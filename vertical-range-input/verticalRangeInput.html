@@ -100,7 +100,10 @@
     else if(thingType === 'custom'){
       thing = data.settings.customThing
       attribute = data.settings.customAttribute;
-      command = data.settings.customCommand;
+      //Get the command equivalent: shadeLevel -> setShadeLevel
+      command = 'set' + attribute.charAt(0).toUpperCase() + attribute.slice(1);
+      //verify that it's a numeric attribute selected
+      verifyAttribute(thing, attribute);
     }
 
     //invert shade level for a nice effect (top-down)
@@ -168,9 +171,22 @@
 
   function showError(message){
     console.warn('CustomTile::VerticalRangeInput:', message)
-    document.getElementById('error').innerText = message;
+    document.getElementById('error').innerHTML = message;
     document.getElementById('error').classList.add('show')
     rangeInput.disabled()
+  }
+
+  //verify that the attribute appears to be a numeric value
+  function verifyAttribute(thing, attribute){
+    let attr = thing.attributes[attribute];
+    console.debug(attr, typeof(attr.value));
+    //if it's a number, we're good
+    if(typeof attr.value === 'number')
+      return true;
+    else{
+      showError(`Attribute <code>${attribute}</code> in Vertical Range Input is not numeric.`)
+      return false;
+    }
   }
 
   function parseRange(range){
@@ -283,12 +299,15 @@
 	#error {
     display: none;
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 0;
     right: 0;
     background: #d30909;
     padding: 0.3em 0.5em;
     color: white;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    z-index: 100; /* above the -/+ endpoint labels */
   }
   #error.show {
     display: block;
@@ -479,12 +498,6 @@
       "name": "customAttribute",
       "label": "Custom Attribute",
       "filters": {"source": "customThing"},
-      "showIf": ["thingType", "==", "custom"]
-    },
-    {
-      "type": "STRING",
-      "name": "customCommand",
-      "label": "Custom Command",
       "showIf": ["thingType", "==", "custom"]
     },
     {

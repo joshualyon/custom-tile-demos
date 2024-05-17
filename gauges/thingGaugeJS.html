@@ -164,8 +164,9 @@
     }
 
     //if the user didn't override the value formatter, use our default which appends the attribute's unit of measure (rather than always using '%')
+    let unitOfMeasure = sourceType === 'thing' ? thing.attributes[attribute].unit : '';
+    unitOfMeasure = chartOptions.units ?? unitOfMeasure; //if the user provided an override, use that
     TextRenderer.prototype.render = function(gauge){
-      let unitOfMeasure = sourceType === 'thing' ? thing.attributes[attribute].unit : '';
 			this.el.innerHTML = formatNumber(gauge.displayedValue, this.fractionDigits) + unitOfMeasure;
     }
     

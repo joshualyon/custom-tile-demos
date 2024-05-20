@@ -173,6 +173,12 @@
     //update the min and max values on the gauge if supplied
     gauge.minValue = chartOptions.min ?? 0;
     gauge.maxValue = chartOptions.max ?? 100;
+
+    //update the animation speed if supplied
+    gauge.animationSpeed = chartOptions.animationSpeed ?? 32;
+
+    //delete the custom properties before passing them forward
+    ['label', 'units', 'min', 'max', 'animationSpeed'].forEach(prop => delete chartOptions[prop])
     
     //update the chart with our combined settings
     gauge.setOptions(chartOptions)

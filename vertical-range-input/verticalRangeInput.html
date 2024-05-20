@@ -19,13 +19,23 @@
     --tooltip-visibility: visible; /* visible | hidden */
     --tooltip-horizontal: 0.96; /* 0=left, 0.5=center, 1=right */
   }
+  /* override the default Custom Tile load transition as it causes backdrop-blur issues */
+  body:not([ct-cloak]) {
+    transition: none;
+  }
+  body:not([ct-cloak]) #range {
+    transition: opacity 1s;
+  }
+  body[ct-cloak] #range {
+    opacity: 0;
+  }
 </style>
 
 
 <div class="full-center">
   <div class="wrapper" id="wrapper">
     <div id="range"></div>
-    <div id="tooltip"></div>
+    <div id="tooltip">-</div>
   </div>
 </div>
 <div id="error"></div>
@@ -237,19 +247,31 @@
   
   let fadeOutTimer;
   
-  function setTooltip(value) {
-    clearTimeout(fadeOutTimer);
-    tooltip.style.opacity = '1';
+  function setTooltip(value, display=true) {
+    //for programmatic updates, don't change the display
+    if(display){
+    	clearTimeout(fadeOutTimer);
+    	tooltip.style.opacity = '1';
+    }
 
     //get the percentage positioning from the range
-    let percentTop = parseInt(rangeEl.querySelector('.range-slider__range').style.top, 10)
+    let thumbTag = INVERT ? 'data-lower' : 'data-upper';
+    let thumbTop = rangeEl.querySelector('.range-slider__thumb[' + thumbTag + ']').style.top
+    
+    const CALC_RE = /calc\((\d+)%\s*[+-]\s*[\d.]+px\)/
+    let percentTop = parseInt(thumbTop.match(CALC_RE)?.[1]) //get the top position from the top: calc(pct + offset)
+    
     let TOOLTIP_HEIGHT = tooltip.getBoundingClientRect().height;
     let RANGE_HEIGHT = rangeEl.getBoundingClientRect().height;
     let TOOLTIP_PERCENT = Math.round((TOOLTIP_HEIGHT / RANGE_HEIGHT) * 100)
-    let MAX_TOP = 100 - TOOLTIP_PERCENT;
+    let MAX_TOP = INVERT ? 100 - TOOLTIP_PERCENT : 100;
+    let MIN_TOP = INVERT ? 0 : 0 + TOOLTIP_PERCENT;
+
+    // console.debug({percentTop, TOOLTIP_HEIGHT, RANGE_HEIGHT, TOOLTIP_PERCENT, MAX_TOP})
     
     //clamp it to the slider space
-    let position = Math.min(percentTop, MAX_TOP)
+    let position = Math.max(Math.min(percentTop, MAX_TOP), MIN_TOP)
+    
   
     tooltip.textContent = value;
     tooltip.style.top = `${position}%`;
@@ -263,6 +285,8 @@
 
   // Function to programmatically update the range value
   function setRangeValue(newValue) {
+    nextTick(()=>{ setTooltip(newValue, false) })
+    
     // console.debug('Request received to setRangeValue:', newValue)
     if(VALUE_COMPLEMENT)
       newValue = getComplement(newValue)
@@ -331,6 +355,8 @@
     top: -30px; /* hidden by default */
     /* transform: translateX(-50%); */
     background-color: var(--track-color);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     color: var(--font-color);
     padding: 4vw;
     border-radius: 0.2em;
@@ -343,6 +369,9 @@
     
     visibility: var(--tooltip-visibility);
     left: calc(var(--tooltip-horizontal) * (100% - 26vw)); /* fraction of the width minus the box size: 18 width + (4 padding * 2) */
+  }
+  .wrapper:not(.inverted) #tooltip {
+    transform: translateY(-100%); /* move the tooltip up so it visually appears to start from the top when top-down */
   }
   
   /* range style */
@@ -375,15 +404,17 @@
   .range-slider[data-vertical] {
     position: absolute;
     background-color: var(--track-color);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     height: var(--height);
     width: var(--width);
-    /* transform: rotate(-180deg); */
     border-radius: var(--radius);
     /* outline: 1px dashed red;
     outline-offset: -1px; */
     overflow: hidden;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate3d(-50%,0,0); /* hint at 3d->gpu rendering preferred instead of just translateX */
+    backface-visibility: hidden; /* more gpu render hints */
   }
   .range-slider .range-slider__range {
     background-color: var(--progress-color);

@@ -10,6 +10,7 @@
     --height: 90vh;
     --radius: 10vw;
     --thumb-height: calc(var(--radius) * 2);
+    --offset-top: 0vh;
     
     --opaque-white: rgba(255,255,255,0.2);
     --track-color: var(--opaque-white);
@@ -379,7 +380,7 @@
     position: relative;
     height: var(--height);
     width: 100%;
-    /* padding: 1rem 0; */
+    margin-top: var(--offset-top);
   }
   .wrapper.endpoint-labels::before, .wrapper.endpoint-labels::after {
     /* display: none; */

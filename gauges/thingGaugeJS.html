@@ -90,6 +90,15 @@
     
     // generateGradient: true,	//calculate the 'gradient' color between the two percentColors
     // percentColors: [[0.0, "#43a047" ], [0.50, "#f9c802"], [1.0, "#ff0000"]],
+
+    // staticLabels: {
+    //   font: "10px sans-serif",  // Specifies font
+    //   labels: [100, 150, 220.1, 260, 300],  // Print labels at these values
+    //   color: "#FFF",     // Optional: Label text color
+    //   fractionDigits: 0  // Optional: Numerical precision. 0=round off.
+    // },
+    fractionDigits: 0,  //adjust the number of decimal digits in the main label
+    
     label: false, //hide the label by default,
     min: 0,
     max: 100
@@ -167,7 +176,9 @@
     let unitOfMeasure = sourceType === 'thing' ? thing.attributes[attribute].unit : '';
     unitOfMeasure = chartOptions.units ?? unitOfMeasure; //if the user provided an override, use that
     TextRenderer.prototype.render = function(gauge){
-			this.el.innerHTML = formatNumber(gauge.displayedValue, this.fractionDigits) + unitOfMeasure;
+			this.el.innerHTML = formatNumber(gauge.displayedValue, chartOptions.fractionDigits) + unitOfMeasure;
+      //we set the textField before the options are parse, so let's just use the fractionDigits setting directly from the options
+      //rather than from the setTextField initialization... especially since we are already customizing the formatter
     }
     
     //update the min and max values on the gauge if supplied

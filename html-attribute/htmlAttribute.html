@@ -1,0 +1,140 @@
+<script src="//cdn.sharptools.io/js/custom-tiles.js"></script>
+
+<div class="main-content">
+  <span id="content"><span data-index="0">Loading...</span></span>
+</div>
+
+<script>
+  //stub a variable to hold the settings at a higher scope
+  var device;
+  var attribute;
+
+  var ELEMENT_SWAP_INTERVAL = 500; //give 500 milliseconds for images in new HTML to render
+  
+  //get the content element so we can update it later
+  var contentEl = document.getElementById("content");
+  //when the tile is ready
+  stio.ready(function(data){
+    //get the settings from the callback
+    device = data.settings.device; 
+    attribute = data.settings.attribute;
+
+    if(device == null)
+      return showError('Configure tile with a device')
+    
+    if(attribute == null)
+      return showError('Configure tile with an attribute')
+
+    let attr = device.attributes[attribute]
+    if(attr == null)
+      return showError('Selected attribute not available on device')
+    
+    //initialize the tile with the HTML content
+    update(attr.value)
+    
+    //and setup the recurring updates
+    attr.onValue(update)
+    
+    //including subscribing to the realtime events
+    device.subscribe(attribute)
+  });
+
+  //helper method for logging an error to console, showing a toast, and updating the tile to display 'Error'
+  function showError(message){
+    console.error(message);
+    stio.showToast(message, "red");
+    contentEl.innerText = "Error";
+  }
+
+
+  function update(value){    
+    //inject the attribute value as HTML
+    // updateHTML(attribute.currentValue); //this approach appends a hidden node, waits a moment, then 
+    contentEl.innerHTML = value //this approach just replaces the HTML which is more efficient, but can result in image flicker
+  }
+
+  function updateHTML(html){
+    //find the OLD child node
+    var oldEl = contentEl.firstChild; //alternatively we could tag the Node and try to find it
+    //create a NEW child node
+    var newEl = document.createElement("span");
+    newEl.innerHTML = html; //with our desired HTML
+    newEl.style.display = "none"; //and style it as hidden
+    contentEl.appendChild(newEl); //and then append it
+    
+    //wait a moment
+    setTimeout(function(){
+      //show the NEW child node  
+      newEl.style.removeProperty("display");
+      //hide the OLD child node
+      oldEl.style.display = "none";
+      oldEl.remove(); //remove itself
+    }, ELEMENT_SWAP_INTERVAL);
+    
+  }
+</script>
+
+<style>
+  html,body {height: 100%;margin:0;}
+  .main-content {
+    display: flex;
+    height:100%;
+    align-items: center;
+    justify-content: center;
+  }
+  .main-content #content {
+    text-align: center; /* OPTIONAL center align any text that gets injected */
+  }
+  .main-content #content img {
+    max-width: 80%; /* OPTIONAL scale any inner images if they're too big */
+  }
+  
+  /* OPTIONAL APPROACH FOR KNOWN CONTENT FORMATS
+     (Uncomment below CSS to use)
+  
+     Another vertical auto-scale approach 
+     where the expected inner content from 
+     the attribute is known.
+  
+     Makes the 'content' holder flex so 
+     we can center and forces the content 
+     into a column.
+
+     Then restricts the to a maximum height
+     and hides the br since it shouldn't
+     display in flex layout.
+  */
+  /*
+  #content { 
+    display: flex; 
+    flex-direction: column;
+    height: 100%; 
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+  }
+  #content img {
+    max-height: 70%; 
+  }
+  #content br { display: none; }
+  */
+</style>
+
+
+<!-- Do not edit immediately below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {"type": "THING", "name": "device", "label": "Thing", "filters": {}},
+    {
+      "type": "THING:ATTRIBUTE:NAME",
+      "name": "attribute",
+      "label": "Attribute (w/ HTML)",
+      "filters": {"source": "device"}
+    }
+  ],
+  "name": "HTML Attribute Display"
+}
+</script>
+<!-- Do not edit above -->

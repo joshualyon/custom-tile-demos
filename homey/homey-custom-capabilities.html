@@ -1,7 +1,7 @@
-<!-- Version: 0.1.0 --> 
+<!-- Version: 0.1.1 --> 
 <div x-data="$store.tile" @click="onClick" id="app" :class="{'clickable': isValidConfig}">
 	<!-- Regular App -->
-  <div x-show="loaded &amp;&amp; isValidConfig" class="data">
+  <div x-show="loaded && isValidConfig" class="data">
     <span x-text="displayedValue" class="attribute-value"></span>
   </div>
   
@@ -14,7 +14,7 @@
   </div>
 
   <!-- Error Message -->
-  <template x-if="loaded &amp;&amp; !isValidConfig">
+  <template x-if="loaded && !isValidConfig">
     <div class="error">
       <span x-text="configurationError"></span>
     </div>
@@ -25,8 +25,9 @@
 <script src="https://unpkg.com/json5@2/dist/index.min.js"></script>
 <script> 
   document.addEventListener('alpine:init', () => {
+    console.log('alpine:init')
     //initialize a store so we can update it based on events
-    Alpine.store('tile', {
+    const myStore = Alpine.store('tile', {
       //data
       debug: false,
       loaded: false,
@@ -61,24 +62,14 @@
         return 'setHomeyString'
       },
       get homeyCapability(){
-        if(!this.attributeName || !this.thing)
-          return;
-        
-        //determine the capability to update
-        //convert the pascalCase attribute name back to snake_case
-        let capability = `homey.${this.pascalToSnake(this.attributeName)}`
-        
-        //we should be able to find a matching capability in this.thing.capabilities[]
-        //make sure the capabilities property exists as an array
-        if(!Array.isArray(this.thing.capabilities))
+        if(!this.attribute || !this.attribute.metadata || !this.attribute.metadata.capabilities)
           return;
 
-        //if we found a match, then return it
-        if(this.thing.capabilities.find(cap => cap === capability))
-          return capability;
+        let capability = this.attribute.metadata.capabilities.find(cap => cap.startsWith("homey."));
+        if(!capability)
+          return;
 
-        //otherwise it will return undefined
-        return;
+        return capability.split("homey.")[1]; //the second part is the raw capability
       },
       get configurationError(){
         //must have a thing and attribute selected
@@ -95,8 +86,8 @@
           return "Must select an ENUM attribute (String)"
         
         //must be a Homey capability that can be inferred
-        // if(!this.homeyCapability)
-        //   return "Could not find a matching CUSTOM Homey Capability"
+        if(!this.homeyCapability)
+          return "Could not find a matching CUSTOM Homey Capability"
       },
       get isValidConfig(){
         return this.configurationError == null; //no error reported
@@ -104,19 +95,35 @@
       
 			//methods
       onClick(){
-      	console.log('onClick called from tile')  
+      	console.log('onClick called from tile') 
+        
         if(!this.loaded)
           console.warn('Tile clicked before it was loaded')
+        
         //based on the type of attribute, show the relevant input
         // ENUM -> List, STRING|NUMBER -> Input, Boolean -> toggle
         if(this.attributeType === 'ENUM'){
-          let items = [...this.attribute.metadata.allowedValues] //copy it out of the Proxy(Array) into a normal array so it can be passed to showList (via MessagePort.postMessage)
-          										.map(item => ({label: this.translate(item), value: item})); //structure it as a ListItem
-          stio.showList(items)
+          //copy it out of the Proxy(Array) into a normal array so it can be passed to showList (via MessagePort.postMessage)
+          let items = [...this.attribute.metadata.allowedValues].map(item => {
+            // and structure it as a ListItem
+            return {
+              label: this.translate(item), 
+              value: item
+            }
+          }); 
+          
+          stio.showList(items).then(value => {
+            //if they exited the list without selecting anything
+            if(value == null)
+              return;
+
+            //otherwise set the new value
+            this.setValue(value);
+          })
         }
       },
       setValue(value){
-        this.thing.sendCommand(this.command, this.homeyCapability, value)
+        this.thing.sendCommand(this.command, [this.homeyCapability, value])
       },
 			translate(input){
         //if we don't have any translations, exit early with the supplied value
@@ -126,42 +133,58 @@
         //see if we can find a translation, otherwise just return the input
         return this.translations[input] || input
       },
-      pascalToSnake(str){ return str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() },
+      pascalToSnake(str){ 
+        return str.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() 
+      },
+      setTranslations(translations){
+        if(translations && translations != ""){
+          //try to parse the translations
+          try{
+            this.translations = JSON5.parse(translations)
+          }
+          catch(error){
+            console.warn('Unable to parse translations. Using empty defaults.')
+          }
+        }
+      },
+      registerAttributeListener(){
+        console.debug('Registering Attribute Listener')
+        //for our desired attribute, register an event listener for value changes
+        this.thing.subscribe(this.attributeName)
+        this.attribute.onValue(value => {
+          //reset the 'thing' reference since the 'thing' setting is a class instance with getters which 
+          // won't otherwise trigger the Proxy Reactivity
+          this.thing = null;
+          this.thing = thing;  
+        })
+      },
+      configure({thing, attribute, translations}){
+        this.thing = thing;
+        this.attributeName = attribute; //alias it to the internal name
+				this.setTranslations(translations);
+        this.loaded = true;
+
+        //if the configuration is valid, setup the event listeners
+        if(this.isValidConfig)
+        	this.registerAttributeListener();
+      }
     })
-    
+
+    // Alpine.effect(()=>{
+    //   console.log('📦 thing', Alpine.store('tile').thing)
+    // });
   })
 </script>
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 <script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
 
 <script>
-  //get a reference to the tile store, so we can update its values
-  const tile = Alpine.store('tile');
-  
+  //When the Custom Tile is initialized with settings, initialize the Alpine store with those settings
+  let thing;
   stio.ready(data => {
-    let {settings} = data;
-    
-    console.log('stio.ready', settings)
-
-    //initialize the Alpine store with our selections
-    tile.thing = settings.thing;
-    tile.attributeName = settings.attribute;
-    //if we have translations supplied
-    if(settings.translations && settings.translations != ""){
-      //try to parse the translations
-      try{
-        tile.translations = JSON5.parse(settings.translations)
-      }
-      catch(error){
-        console.warn('Unable to parse translations. Using empty defaults.')
-      }
-    }
-    tile.loaded = true;
+    thing = data.settings.thing;
+    Alpine.store('tile').configure(data.settings)
   })
-
-  function sendCommand(){
-    
-  }
 </script>
 
 
@@ -229,7 +252,7 @@
     },
     {"type": "STRING", "name": "translations", "label": "Translations (JSON)"}
   ],
-  "name": "Homey Custom Capabilities"
+  "name": "Homey Custom Capability"
 }
 </script>
 <!-- Do not edit above -->

@@ -1,0 +1,584 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+    {
+      "schema": "0.2.0",
+      "settings": [
+        {
+          "type": "THING",
+          "name": "keypad",
+          "label": "Keypad Device",
+          "filters": {"capabilities": ["lockCodes", "pushableButton"]}
+        },
+        {"type": "BOOLEAN", "name": "isPanicShown", "label": "Show Panic Button"}
+      ],
+      "name": "Virtual Basic Keypad",
+      "dimensions": {"height": 3, "width": 2}
+    }
+</script>
+<!-- Do not edit above -->
+
+<style>
+    html {
+        height: 100%;
+    }
+
+    body {
+        margin: 0;
+        padding: 0;
+        color: black;
+        font-family: Arial, sans-serif;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+    }
+
+    .keypad-container {
+        width: 100%;
+        height: 100%;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        background-color: #f5f5f5;
+        padding: 10px;
+        box-sizing: border-box;
+    }
+
+    .display {
+        width: 100%;
+        min-height: 60px;
+        margin-bottom: 10px;
+        background-color: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 24px;
+        position: relative;
+        overflow: hidden;
+        transition: background-color 0.3s, border-color 0.3s;
+    }
+
+    .display-text {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: center;
+        padding: 0 10px;
+        transition: color 0.3s;
+    }
+
+    .display.syncing::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        height: 3px;
+        width: 100%;
+        background-color: #ffc107;
+        animation: pulse 1.5s infinite;
+    }
+
+    .display.error {
+        border: 2px solid #f44336;
+        background-color: #ffebee;
+        animation: shake 0.5s;
+    }
+
+    .display.success {
+        border: 2px solid #4CAF50;
+        background-color: #E8F5E9;
+        animation: pulse-success 1s;
+    }
+
+    @keyframes shake {
+
+        0%,
+        100% {
+            transform: translateX(0);
+        }
+
+        10%,
+        30%,
+        50%,
+        70%,
+        90% {
+            transform: translateX(-5px);
+        }
+
+        20%,
+        40%,
+        60%,
+        80% {
+            transform: translateX(5px);
+        }
+    }
+
+    @keyframes pulse {
+        0% {
+            opacity: 0.2;
+        }
+
+        50% {
+            opacity: 1;
+        }
+
+        100% {
+            opacity: 0.2;
+        }
+    }
+
+    @keyframes pulse-success {
+        0% {
+            box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+        }
+
+        70% {
+            box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+        }
+
+        100% {
+            box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+        }
+    }
+
+    .keypad-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-around;
+        margin-top: 5px;
+    }
+
+    .keypad {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        grid-gap: 8px;
+        width: 100%;
+        margin-bottom: 10px;
+    }
+
+    .key {
+        background-color: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 12px 0;
+        font-size: 20px;
+        text-align: center;
+        cursor: pointer;
+        user-select: none;
+        transition: background-color 0.2s, transform 0.1s;
+    }
+
+    .key:active {
+        background-color: #e0e0e0;
+        transform: scale(0.98);
+    }
+
+    .action-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 8px;
+        width: 100%;
+        margin-bottom: 10px;
+    }
+
+    .control-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        grid-gap: 8px;
+        width: 100%;
+    }
+
+    .clear-btn {
+        grid-column: span 2;
+        background-color: #f44336;
+        color: white;
+    }
+
+    .arm-home {
+        background-color: #4CAF50;
+        color: white;
+    }
+
+    .arm-away {
+        background-color: #2196F3;
+        color: white;
+    }
+
+    .disarm {
+        background-color: #9E9E9E;
+        color: white;
+    }
+
+    .panic {
+        background-color: #f44336;
+        color: white;
+        grid-column: span 3;
+    }
+
+    /* Media queries for responsive design */
+    @media (max-height: 400px) {
+        .keypad-container {
+            padding: 5px;
+        }
+
+        .display {
+            min-height: 40px;
+            margin-bottom: 5px;
+        }
+
+        .display-text {
+            font-size: 18px;
+        }
+
+        .key {
+            padding: 8px 0;
+            font-size: 16px;
+        }
+
+        .keypad,
+        .action-buttons,
+        .control-buttons {
+            grid-gap: 5px;
+            margin-bottom: 5px;
+        }
+    }
+</style>
+
+<div class="keypad-container">
+    <div class="display" id="display">
+        <div class="display-text" id="displayText">Ready</div>
+    </div>
+
+    <div class="keypad-section">
+        <div class="keypad">
+            <div class="key" onclick="pressKey(1)" role="button" aria-label="One">1</div>
+            <div class="key" onclick="pressKey(2)" role="button" aria-label="Two">2</div>
+            <div class="key" onclick="pressKey(3)" role="button" aria-label="Three">3</div>
+            <div class="key" onclick="pressKey(4)" role="button" aria-label="Four">4</div>
+            <div class="key" onclick="pressKey(5)" role="button" aria-label="Five">5</div>
+            <div class="key" onclick="pressKey(6)" role="button" aria-label="Six">6</div>
+            <div class="key" onclick="pressKey(7)" role="button" aria-label="Seven">7</div>
+            <div class="key" onclick="pressKey(8)" role="button" aria-label="Eight">8</div>
+            <div class="key" onclick="pressKey(9)" role="button" aria-label="Nine">9</div>
+            <div class="key" style="visibility: hidden"></div>
+            <div class="key" onclick="pressKey(0)" role="button" aria-label="Zero">0</div>
+            <div class="key" style="visibility: hidden"></div>
+        </div>
+
+        <div class="action-buttons">
+            <div class="key clear-btn" onclick="pressClear()" role="button" aria-label="Clear">Clear</div>
+        </div>
+
+        <div class="control-buttons">
+            <div class="key arm-home" onclick="pressAction('armHome')" role="button" aria-label="Arm Home">Arm Home
+            </div>
+            <div class="key arm-away" onclick="pressAction('armAway')" role="button" aria-label="Arm Away">Arm Away
+            </div>
+            <div class="key disarm" onclick="pressAction('disarm')" role="button" aria-label="Disarm">Disarm</div>
+        </div>
+
+        <div id="panicContainer" style="width: 100%; margin-top: 10px; display: none;">
+            <div class="key panic" onclick="pressPanic()" role="button" aria-label="Panic">PANIC</div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.sharptools.io/js/custom-tiles/0.2.1/stio.js"></script>
+<script>
+    // Global variables
+    let keypad;
+    let localPinLength = 0;
+    let confirmedPinLength = 0;
+    let syncTimerId = null;
+    let statusTimerId = null;
+    let syncTimeout = 2000; // 2 seconds
+    let isSyncing = false;
+    let lastKeyPressed = null;
+    let ignoreStarUpdates = false;
+    let actionInProgress = false;
+
+    // Action labels for user-friendly display
+    const actionLabels = {
+        'armHome': 'Arming (Home)',
+        'armAway': 'Arming (Away)',
+        'disarm': 'Disarming'
+    };
+
+    // Action result labels for completion states
+    const actionResultLabels = {
+        'armHome': 'Armed (Home)',
+        'armAway': 'Armed (Away)',
+        'disarm': 'Disarmed'
+    };
+
+    // Initialize when stio is ready
+    stio.ready(function (data) {
+        // Get the keypad device from settings
+        keypad = data.settings.keypad;
+
+        // Check if panic button should be shown
+        if (data.settings.isPanicShown) {
+            document.getElementById('panicContainer').style.display = 'block';
+        }
+
+        // Subscribe to the InputDisplay attribute to get updates
+        if (keypad) {
+            keypad.subscribe('InputDisplay');
+
+            // Set initial display if available
+            if (keypad.attributes && keypad.attributes.InputDisplay) {
+                updateDisplayFromDevice(keypad.attributes.InputDisplay.value);
+            }
+
+            // Listen for changes to the InputDisplay attribute
+            keypad.attributes.InputDisplay.onValue(function (value) {
+                updateDisplayFromDevice(value);
+            });
+        } else {
+            // Show error if no device is configured
+            showError("No keypad device configured");
+        }
+    });
+
+    // Function to handle numeric key presses
+    function pressKey(number) {
+        if (!keypad) return;
+
+        // Send the push command with the number
+        keypad.sendCommand("push", [number.toString()]);
+
+        // Update local pin length
+        localPinLength++;
+        lastKeyPressed = number;
+
+        // Generate the display string
+        let newDisplay = generatePinDisplay();
+
+        // Update the display
+        updateDisplay(newDisplay);
+
+        // Start sync indicator
+        startSyncTimer();
+    }
+
+    // Function to generate PIN display
+    function generatePinDisplay() {
+        // Always use the longer of the two for consistency
+        const effectiveLength = Math.max(localPinLength, confirmedPinLength);
+
+        // If we have a local input that's longer than confirmed
+        if (localPinLength > confirmedPinLength) {
+            let display = "";
+            // Add asterisks for all previous digits
+            for (let i = 0; i < localPinLength - 1; i++) {
+                display += "*";
+            }
+            // Add the last digit
+            display += lastKeyPressed;
+            return display;
+        } else {
+            // If confirmed is up to date or longer, show all asterisks
+            return "*".repeat(effectiveLength);
+        }
+    }
+
+    // Function to handle Clear button
+    function pressClear() {
+        if (!keypad) return;
+
+        keypad.sendCommand("push", ["Clear"]);
+        updateDisplay("Enter Code");
+        localPinLength = 0;
+        confirmedPinLength = 0;
+
+        // Set a flag to ignore asterisk updates for a short period
+        ignoreStarUpdates = true;
+        setTimeout(() => { ignoreStarUpdates = false; }, 2000);
+
+        startSyncTimer();
+    }
+
+    // Function to handle Arm Home, Arm Away, Disarm actions
+    function pressAction(action) {
+        if (!keypad) return;
+
+        keypad.sendCommand("push", [action]);
+
+        // Show user-friendly action text
+        const actionText = actionLabels[action] || action;
+        updateDisplay(actionText);
+
+        // Set a flag to ignore asterisk updates
+        actionInProgress = true;
+        ignoreStarUpdates = true;
+
+        startSyncTimer();
+    }
+
+    // Function to handle Panic button
+    function pressPanic() {
+        if (!keypad) return;
+
+        keypad.sendCommand("push", ["Panic"]);
+        showError("PANIC ACTIVATED");
+        startSyncTimer();
+    }
+
+    // Function to update display
+    function updateDisplay(text) {
+        const displayTextElement = document.getElementById('displayText');
+        displayTextElement.textContent = text;
+    }
+
+    // Function to show error state
+    function showError(message) {
+        const displayElement = document.getElementById('display');
+
+        // Clear any existing status classes and sync indicators
+        clearStatusClasses();
+        clearSyncTimer();
+        displayElement.classList.remove('syncing');
+        isSyncing = false;
+
+        // Set the error message
+        updateDisplay(message);
+
+        // Add error class
+        displayElement.classList.add('error');
+
+        // Set a timer to clear the error state after 3 seconds
+        if (statusTimerId) {
+            clearTimeout(statusTimerId);
+        }
+
+        statusTimerId = setTimeout(function () {
+            displayElement.classList.remove('error');
+        }, 3000);
+    }
+
+    // Function to show success state
+    function showSuccess(message) {
+        const displayElement = document.getElementById('display');
+
+        // Clear any existing status classes and sync indicators
+        clearStatusClasses();
+        clearSyncTimer();
+        displayElement.classList.remove('syncing');
+        isSyncing = false;
+
+        // Set the success message
+        updateDisplay(message);
+
+        // Add success class
+        displayElement.classList.add('success');
+
+        // Set a timer to clear the success state after 3 seconds
+        if (statusTimerId) {
+            clearTimeout(statusTimerId);
+        }
+
+        statusTimerId = setTimeout(function () {
+            displayElement.classList.remove('success');
+        }, 3000);
+    }
+
+    // Function to clear status classes
+    function clearStatusClasses() {
+        const displayElement = document.getElementById('display');
+        displayElement.classList.remove('error', 'success');
+    }
+
+    // Function to update display from device attribute
+    function updateDisplayFromDevice(text) {
+        // Check for success message pattern
+        const successMatch = text.match(/Success\.\s+Executing\s+(\w+)/i);
+        if (successMatch) {
+            const action = successMatch[1];
+            const resultText = actionResultLabels[action] || action;
+            showSuccess(resultText);
+            localPinLength = 0;
+            confirmedPinLength = 0;
+            ignoreStarUpdates = false;
+            actionInProgress = false;
+            return;
+        }
+
+        // Check for error patterns
+        if (text === "Input Denied" || text.includes("Error") || text.includes("Failed")) {
+            showError(text);
+            localPinLength = 0;
+            confirmedPinLength = 0;
+            ignoreStarUpdates = false;
+            actionInProgress = false;
+            return;
+        }
+
+        // Handle standard PIN display
+        if (text === "Enter Code" || text === "Ready") {
+            updateDisplay(text);
+            localPinLength = 0;
+            confirmedPinLength = 0;
+            ignoreStarUpdates = false;
+            actionInProgress = false;
+        }
+        // Count asterisks if the text contains only asterisks
+        else if (/^\*+$/.test(text)) {
+            // Skip asterisk updates if an action is in progress or Clear was pressed
+            if (ignoreStarUpdates || actionInProgress) {
+                return;
+            }
+
+            confirmedPinLength = text.length;
+
+            // Only update the display if local input isn't ahead
+            if (localPinLength <= confirmedPinLength) {
+                updateDisplay(text);
+            } else {
+                // If local is ahead, regenerate the display to show the proper mix
+                updateDisplay(generatePinDisplay());
+            }
+        }
+        // For any other message, just show it directly
+        else {
+            updateDisplay(text);
+        }
+
+        // Clear any pending sync timer
+        clearSyncTimer();
+
+        // Remove syncing indicator
+        document.getElementById('display').classList.remove('syncing');
+        isSyncing = false;
+    }
+
+    // Start sync timer to indicate local changes not yet confirmed by device
+    function startSyncTimer() {
+        // Clear any existing timer
+        clearSyncTimer();
+
+        // Show syncing indicator
+        document.getElementById('display').classList.add('syncing');
+        isSyncing = true;
+
+        // Start new timer
+        syncTimerId = setTimeout(function () {
+            // If we reach here, the device didn't respond with a new value in time
+            if (isSyncing) {
+                // Show warning with orange border
+                const displayElement = document.getElementById('display');
+                displayElement.style.borderColor = '#ff9800';
+            }
+        }, syncTimeout);
+    }
+
+    // Clear sync timer
+    function clearSyncTimer() {
+        if (syncTimerId) {
+            clearTimeout(syncTimerId);
+            syncTimerId = null;
+            document.getElementById('display').style.borderColor = '#ccc';
+        }
+    }
+</script>

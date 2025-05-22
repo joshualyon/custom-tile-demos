@@ -2,6 +2,8 @@
 
 A simple, customizable SharpTools Custom Tile for triggering Hubitat devices with the `PushableButton` capability.
 
+[⏬ Import HE Virtual Button Custom Tile (into SharpTools)](https://sharptools.io/developer/custom-tiles/import/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjoshualyon%2Fcustom-tile-demos%2Frefs%2Fheads%2Fmain%2Fhe-virtual-button%2FheVirtualButton.html)
+
 ## Features
 
 - **Clean, minimal design** that inherits styling from your tile configuration
@@ -16,10 +18,11 @@ A simple, customizable SharpTools Custom Tile for triggering Hubitat devices wit
 1. Open your [SharpTools Custom Tile Developer Tools](https://sharptools.io/developer/custom-tiles/)
 2. Create a new Custom Tile and select "HTML" type
 3. Copy and paste the HTML code from this repository
-4. Configure the tile settings as described below
-5. Save and add the tile to your dashboard
+4. Save and add the tile to your dashboard
+5. Configure the tile settings as described below
 
 ## Configuration
+After adding an instance of the Custom Tile to a dashboard, you can edit the tile to select your desired button device and other optional customizations. 
 
 ### Required Settings
 

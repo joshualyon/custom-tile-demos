@@ -1,0 +1,277 @@
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "THING",
+      "name": "device",
+      "label": "Button Device",
+      "filters": {"capabilities": ["pushableButton"]}
+    },
+    {
+      "type": "NUMBER",
+      "name": "buttonNumber",
+      "label": "Button Number",
+      "default": 1
+    },
+    {
+      "type": "LABEL",
+      "name": "buttonNumberLabel",
+      "label": "Button Number Label",
+      "value": "Leave Button Number blank to prompt for the button number on press"
+    },
+    {
+      "type": "ENUM",
+      "name": "displayType",
+      "label": "Display Type",
+      "values": [
+        {"label": "Icon", "value": "icon"},
+        {"label": "Text", "value": "text"}
+      ],
+      "default": "icon"
+    },
+    {
+      "type": "ENUM",
+      "name": "iconLibrary",
+      "label": "Icon Library",
+      "values": [
+        {"label": "Font Awesome", "value": "fontawesome"},
+        {"label": "Material Design", "value": "materialdesign"}
+      ],
+      "default": "fontawesome",
+      "showIf": ["displayType", "==", "icon"]
+    },
+    {
+      "type": "STRING",
+      "name": "iconName",
+      "label": "Icon Name",
+      "default": "power-off",
+      "showIf": ["displayType", "==", "icon"]
+    },
+    {
+      "type": "STRING",
+      "name": "displayText",
+      "label": "Display Text",
+      "showIf": ["displayType", "==", "text"]
+    }
+  ],
+  "name": "Hubitat Virtual Button"
+}
+</script>
+<!-- Do not edit above -->
+
+
+<style>
+    html {
+        height: 100%;
+    }
+    
+    body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-family: inherit;
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    .tile-content {
+        text-align: center;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+    }
+    
+    .tile-content:active {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .icon-display {
+        font-size: 2.5em;
+    }
+    
+    .text-display {
+        font-size: 1.2em;
+        font-weight: 500;
+    }
+    
+    .default-icon {
+        width: 40px;
+        height: 40px;
+        border: 3px solid currentColor;
+        border-radius: 50%;
+        position: relative;
+    }
+    
+    .default-icon::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 12px;
+        height: 12px;
+        background: currentColor;
+        border-radius: 50%;
+    }
+    
+    .error-message {
+        color: #ff6b6b;
+        font-size: 0.9em;
+        text-align: center;
+        padding: 10px;
+    }
+</style>
+
+<!-- Font Awesome -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Material Design Icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.2.96/css/materialdesignicons.min.css">
+
+<div class="tile-content" onclick="handleButtonPress()">
+    <div id="content">
+        <div class="error-message">Loading...</div>
+    </div>
+</div>
+
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script>
+    let device = null;
+    let buttonNumber = null;
+    let displayType = 'icon';
+    let iconName = '';
+    let displayText = '';
+    let iconLibrary = 'fontawesome';
+    
+    stio.ready(function(data) {
+        // Get the configured device and settings
+        device = data.settings.device;
+        buttonNumber = data.settings.buttonNumber;
+        displayType = data.settings.displayType || 'icon';
+        iconName = data.settings.iconName || '';
+        displayText = data.settings.displayText || '';
+        iconLibrary = data.settings.iconLibrary || 'fontawesome';
+        
+        // Validate that we have a device
+        if (!device) {
+            showError("Please configure a device with PushableButton capability.");
+            return;
+        }
+        
+        // Subscribe to device updates
+        device.subscribe(['numberOfButtons', 'pushed']);
+        
+        // Initialize the tile display
+        updateDisplay();
+    });
+    
+    function updateDisplay() {
+        const contentDiv = document.getElementById('content');
+        
+        if (!device) {
+            showError("No device configured");
+            return;
+        }
+        
+        let displayContent = '';
+        
+        if (displayType === 'text' && displayText.trim()) {
+            // Show custom text
+            displayContent = `<div class="text-display">${displayText}</div>`;
+        } else if (displayType === 'icon' && iconName.trim()) {
+            // Show custom icon
+            const iconClass = getIconClass(iconName, iconLibrary);
+            displayContent = `<div class="icon-display"><i class="${iconClass}"></i></div>`;
+        } else {
+            // Show default button icon
+            displayContent = `<div class="icon-display"><div class="default-icon"></div></div>`;
+        }
+        
+        contentDiv.innerHTML = displayContent;
+    }
+    
+    function getIconClass(iconName, library) {
+        // Handle different icon library prefixes
+        if (library === 'fontawesome') {
+            if (!iconName.startsWith('fa-')) {
+                return `fas fa-${iconName}`;
+            }
+            return `fas ${iconName}`;
+        } else if (library === 'materialdesign') {
+            if (!iconName.startsWith('mdi-')) {
+                return `mdi mdi-${iconName}`;
+            }
+            return `mdi ${iconName}`;
+        }
+        
+        // Fallback - assume user provided full class name
+        return iconName;
+    }
+    
+    function handleButtonPress() {
+        if (!device) {
+            stio.showToast("No device configured", "red");
+            return;
+        }
+        
+        // If button number is specified, push it directly
+        if (buttonNumber && buttonNumber > 0) {
+            pushButton(buttonNumber);
+            return;
+        }
+        
+        // If no button number specified, show list of available buttons
+        const numberOfButtons = device.attributes.numberOfButtons ? device.attributes.numberOfButtons.value : 1;
+        
+        if (numberOfButtons === 1) {
+            // Only one button available, push it directly
+            pushButton(1);
+            return;
+        }
+        
+        // Create list of buttons for user to choose from
+        const buttonList = [];
+        for (let i = 1; i <= numberOfButtons; i++) {
+            buttonList.push({
+                label: `Button ${i}`,
+                value: i
+            });
+        }
+        
+        stio.showList({
+            title: "Select Button to Push",
+            items: buttonList
+        }).then(function(selectedButton) {
+            if (selectedButton) {
+                pushButton(selectedButton);
+            }
+        });
+    }
+    
+    function pushButton(btnNum) {
+        if (!device) {
+            stio.showToast("No device available", "red");
+            return;
+        }
+        
+        try {
+            device.sendCommand("push", [btnNum]);
+            // No success toast - let the user's tile configuration handle visual feedback
+        } catch (error) {
+            console.error("Error pushing button:", error);
+            stio.showToast("Error pushing button", "red");
+        }
+    }
+    
+    function showError(message) {
+        const contentDiv = document.getElementById('content');
+        contentDiv.innerHTML = `<div class="error-message">${message}</div>`;
+    }
+</script>

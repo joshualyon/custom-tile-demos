@@ -128,6 +128,15 @@ var parseRange = function parseRange(range) {
     }
     return false;
 };
+var sanitizeCommand = function sanitizeCommand(cmd) {
+    if (!cmd || typeof cmd !== "string") return null;
+    // Remove parentheses and anything inside them
+    cmd = cmd.replace(/\([^)]*\)/g, "");
+    // Trim whitespace
+    cmd = cmd.trim();
+    // Return null if empty, otherwise return sanitized command
+    return cmd.length > 0 ? cmd : null;
+};
 var getComplement = function getComplement(value) {
     var min = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : MIN, max = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : MAX;
     // Scale factor for fixed-point precision
@@ -272,8 +281,15 @@ stio.ready(function(data) {
     } else if (thingType === "custom") {
         thing = data.settings.customThing;
         attribute = data.settings.customAttribute;
-        //Get the command equivalent: shadeLevel -> setShadeLevel
-        command = "set" + attribute.charAt(0).toUpperCase() + attribute.slice(1);
+        //Sanitize the custom command first (returns null if not set or empty string)
+        var sanitizedCommand = sanitizeCommand(data.settings.customCommand);
+        //Use custom command if customizeCommand is checked AND we have a valid sanitized command
+        if (data.settings.customizeCommand && sanitizedCommand) {
+            command = sanitizedCommand;
+        } else {
+            //Get the command equivalent: shadeLevel -> setShadeLevel
+            command = "set" + attribute.charAt(0).toUpperCase() + attribute.slice(1);
+        }
         //verify that it's a numeric attribute selected
         verifyAttribute(thing, attribute);
     }
@@ -554,6 +570,18 @@ var fadeOutTimer;
       "label": "Custom Attribute",
       "filters": {"source": "customThing"},
       "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "BOOLEAN",
+      "name": "customizeCommand",
+      "label": "Use Custom Command",
+      "showIf": ["thingType", "==", "custom"]
+    },
+    {
+      "type": "STRING",
+      "name": "customCommand",
+      "label": "Custom Command Name",
+      "showIf": [["customizeCommand", "==", true], ["thingType", "==", "custom"]]
     },
     {
       "type": "STRING",

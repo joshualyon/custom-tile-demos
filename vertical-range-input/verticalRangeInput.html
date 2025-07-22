@@ -76,7 +76,7 @@
       if(!isUser)
         return;
       
-      // console.debug(`value change is pending, update tooltip: ${value}`, isUser)
+      // console.debug(`value change is pending, update tooltip: v1=${v1}, v2=${v2} value=${value}`, isUser)
       nextTick(()=>{
       	setTooltip(value);
       });
@@ -87,8 +87,8 @@
       let value = INVERT ? -v1 : v2;
       if(VALUE_COMPLEMENT)
         value = getComplement(value);
-      
-      // console.debug(`value is commited: ${value}`)
+
+      // console.debug(`value is commited. v1=${v1} v2=${v2} ${value}`)
       sendCommand(value);
       startFadeOutTimer();
     }
@@ -128,14 +128,23 @@
       verifyAttribute(thing, attribute);
     }
 
-    //invert shade level for a nice effect (top-down)
-    if(['shadeLevel', 'shadeTiltLevel', 'position', 'tilt'].includes(attribute)){
+    //handle inversion logic with user's sliderMode preference taking precedence for custom things
+    if (thingType === 'custom' && ['pullDown', 'pushUp'].includes(data.settings.sliderMode)) {
+      if (data.settings.sliderMode === 'pullDown') {
+        INVERT = false;
+        VALUE_COMPLEMENT = true;
+      }
+      // else: keep defaults (INVERT = true, VALUE_COMPLEMENT = false)
+    }
+    //only apply hardcoded rules if NOT a custom thing AND sliderMode preference unset (or 'auto')
+    else if(['shadeLevel', 'shadeTiltLevel', 'position', 'tilt'].includes(attribute)){
       INVERT = false;
   		VALUE_COMPLEMENT = true;
-      //set the thumbs according to the inversion
-      let thumbs = INVERT ? [false, true] : [true, false]
-      rangeInput.thumbsDisabled(thumbs)
     }
+    
+    //set the thumbs according to the inversion
+    let thumbs = INVERT ? [false, true] : [true, false]
+    rangeInput.thumbsDisabled(thumbs)
     
     //alias the step setting for easy reference
     step = data.settings.step;
@@ -589,6 +598,18 @@
         {"label": "-/+", "value": "plusMinus"}
       ],
       "default": "plusMinus"
+    },
+    {
+      "type": "ENUM", 
+      "name": "sliderMode",
+      "label": "Slider Mode",
+      "values": [
+        {"label": "Automatic", "value": "auto"},
+        {"label": "Pull Down", "value": "pullDown"},
+        {"label": "Push Up", "value": "pushUp"}
+      ],
+      "default": "auto",
+      "showIf": ["thingType", "==", "custom"]
     },
     {"type": "BOOLEAN", "name": "handle", "label": "Show Handle"}
   ],

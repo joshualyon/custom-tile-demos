@@ -168,6 +168,12 @@ myVariable.onValue(function(value) {
 const currentValue = myVariable.value;
 ```
 
+**Variable Setting Requirements**: When using VARIABLE in tile settings, you MUST specify the variable type filter:
+```json
+{"type": "VARIABLE", "name": "variable", "label": "Variable", "filters": {"type": "String"}}
+```
+Available types: "String", "Number", "Boolean"
+
 ### User Interaction Methods
 ```javascript
 // Show toast notification
@@ -223,13 +229,20 @@ Variable integration:
 {
   "schema": "0.2.0",
   "settings": [
-    {"type": "VARIABLE", "name": "variable", "label": "Variable"}
+    {
+      "type": "VARIABLE", 
+      "name": "variable", 
+      "label": "Variable",
+      "filters": {"type": "String"}
+    }
   ],
   "name": "Variable Tile"
 }
 </script>
 <!-- Do not edit above -->
 ```
+
+**Important**: VARIABLE settings MUST specify `filters.type` with one of: "String", "Number", or "Boolean".
 
 Legacy API approach (deprecated - use schema 0.2.0 for new tiles):
 ```html

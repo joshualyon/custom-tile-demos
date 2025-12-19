@@ -1,0 +1,2033 @@
+<script>
+  /*
+    VERSION: 2024-12-19
+
+    Multi-provider weather tile supporting:
+    - Open-Meteo (no API key required - default)
+    - OpenWeatherMap 2.5 Multi-endpoint
+    - OpenWeatherMap 3.0 OneCall
+
+    The API Key, Latitude, and Longitude are now set in the Tile Settings
+    when you edit an individual tile.
+
+    You can also adjust the setting here instead and it will apply as your
+    base setting across ALL instances of this tile unless explicitly
+    overridden in an individual tile's settings
+  */
+  var API_KEY = ''; //this is set in tile settings now
+  var LAT=33,LON=-96; //this is set in tile settings now
+  var REFRESH_INTERVAL = 3 * 60 * 60 * 1000; //3 hours in milliseconds, set in tile settings now
+</script>
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "values": [
+        {"label": "Open-Meteo (No API Key)", "value": "openmeteo"},
+        {"label": "OpenWeather 2.5 Multi", "value": "2-5multi"},
+        {"label": "OpenWeather 3.0 OneCall", "value": "3-0onecall"}
+      ],
+      "name": "apiPreference",
+      "default": "openmeteo",
+      "label": "API Provider",
+      "type": "ENUM"
+    },
+    {
+      "type": "STRING",
+      "label": "OpenWeather API Key",
+      "name": "apiKey",
+      "showIf": ["apiPreference", "!=", "openmeteo"]
+    },
+    {
+      "name": "location",
+      "default": "33,-96",
+      "placeholder": "33,-96",
+      "label": "Location (lat, lon)",
+      "type": "STRING"
+    },
+    {
+      "default": "imperial",
+      "label": "Units",
+      "values": ["imperial", "metric"],
+      "type": "ENUM",
+      "name": "units"
+    },
+    {"label": "Language (see docs)", "type": "STRING", "name": "lang"},
+    {
+      "values": [
+        {"label": "Default", "value": "default"},
+        {"label": "Today", "value": "today-only"},
+        {"label": "Today (Wide)", "value": "today-wide"},
+        {"label": "Today (Mini)", "value": "today-mini"},
+        {"label": "Forecast", "value": "forecast-only"},
+        {"label": "Forecast (Horizontal)", "value": "forecast-horizontal"}
+      ],
+      "type": "ENUM",
+      "label": "Layout",
+      "name": "layout",
+      "default": "default"
+    },
+    {
+      "type": "BOOLEAN",
+      "default": true,
+      "name": "showLocationName",
+      "label": "Show Location Name",
+      "showIf": ["layout", "==", "today-wide"]
+    },
+    {
+      "type": "BOOLEAN",
+      "default": true,
+      "name": "useDefaultBackground",
+      "label": "Use Included Background"
+    },
+    {
+      "name": "showAqi",
+      "type": "BOOLEAN",
+      "label": "Show AQI (Air Quality)",
+      "default": false
+    },
+    {
+      "default": false,
+      "name": "isCustomRefreshInterval",
+      "type": "BOOLEAN",
+      "label": "Custom Refresh Interval"
+    },
+    {
+      "type": "NUMBER",
+      "showIf": ["isCustomRefreshInterval", "==", true],
+      "label": "Refresh Interval (minutes)",
+      "default": 180,
+      "name": "refreshInterval"
+    }
+  ],
+  "name": "Weather Tile",
+  "dimensions": {"width": 3, "height": 2}
+}
+</script>
+<!-- Do not edit above -->
+<script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=Promise,Promise.allSettled,Object.assign,Intl"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios@0.27.2"></script>
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+
+
+<div id="app" :data-layout="appLayout" :data-temperature-digits="temperatureDigits" :class="appClasses">
+  <!-- TODAY data -->
+  <div class="today">
+    <div class="weather-icon">
+      <img :src="weatherIconImageUrl">
+      <span class="hide">{{weatherIcon}}</span>
+    </div>
+    <div class="weather-summary">{{weatherSummary}}</div>
+    <div class="temperature">{{temperature}}</div>
+    <div class="overview">
+    	<span class="feels-like" v-show="feelsLike">{{getPhrase('feels_like')}} {{feelsLike}}</span>
+      <span class="air-quality" v-show="aqiIndex" v-text="aqiIndex" :class="getAqiClass(aqiIndex)"></span>
+		</div>
+    <div class="high-low" v-show="highTemp || lowTemp">
+      <div class="high">{{highTemp}}</div>
+      <div class="low">{{lowTemp}}</div>
+    </div>
+    <div class="sunset-and-sunrise" v-show="sunsetTime || sunriseTime">
+      <div class="sunrise-time" v-text="sunriseTime"></div>
+      <div class="inline-icon sun-icon">
+      	<img :src="getMeteoconUrl('horizon', 'fill')">
+      </div>
+      <div class="sunset-time" v-text="sunsetTime"></div>
+    </div>
+    <div class="extras">
+      <!-- wind speed -->
+      <div class="wind-speed" v-show="windSpeed">
+      	<span class="value" v-text="windSpeed"></span>
+        <span class="units" v-text="windUoM"></span>
+      	<div class="inline-icon invert"><img :src="getErikFlowerIconUrl('strong-wind')"></div>
+      </div>
+      <!-- humidity -->
+      <div class="humidity" v-show="humidity">
+      	<span class="value" v-text="humidity"></span><!--
+        --><span class="units">%</span>
+      	<div class="inline-icon invert"><img :src="getErikFlowerIconUrl('raindrop')"></div>
+      </div>
+      <!-- precipitation -->
+      <div class="precipitation" v-show="precipitation">
+      	<span class="value" v-text="precipitation"></span><!-- 
+        --><span class="units">%</span>
+      	<div class="inline-icon invert"><img :src="getErikFlowerIconUrl('umbrella')"></div>
+      </div>
+    </div>
+  </div>
+  <!-- FORECAST DATA --> 
+  <table class="forecast" ref="forecastTable">
+    <tbody><tr class="day" v-for="day in forecast">
+      <td class="day-of-week">{{getDoW(day)}}</td>
+      <td class="weather-icon" align="center"><img :src="getIconUrl(day)"></td>
+      <td class="high" align="right">{{getHigh(day)}}</td>
+      <td class="low" align="right">{{getLow(day)}}</td>
+    </tr>
+  </tbody></table>
+  <div class="location-name" v-show="showLocationName && locationName" v-text="locationName"></div>
+  <div class="error" v-if="error">
+    <span v-text="error"></span>
+  </div>
+</div>
+
+
+<style>
+  :root {
+    --unit: 1vh; /* fallback value for old browsers that don't support min */
+    --1u: var(--unit);
+    --2u: calc(2 * var(--unit));
+    --3u: calc(3 * var(--unit));
+    --font-size: 5vh;
+    --line-height: calc(1.5 * var(--font-size));
+  }
+  @supports (width: min(1vh, 1vw)) {
+    :root {
+      --unit: min(1vh, 1vw); /* newer browsers should support this */
+    }
+  }
+  html, body { height: 100%; margin: 0; font-size: var(--font-size);  }
+  #app { height: 100%; display: flex; justify-content: space-evenly}
+  #app.default-background { background: linear-gradient(52deg, rgba(12,5,147,1) 0%, rgba(16,16,172,1) 30%, rgba(113,0,255,1) 100%); }
+	
+
+  /* Base Template */
+	.location-name { position: absolute; top: var(--3u); left: var(--3u);}
+  
+  .today { text-align: center; }
+  .today .temperature { font-size: 20vh; } /* minor padding left to visual center (account for deg symbol) */
+  .today .feels-like { opacity: 0.8; }
+  .today .weather-summary { text-transform: capitalize; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+  .today .weather-icon img { max-width: 30vw; max-height: 30vh; }
+  .today .extras, .today .extras > div, .today .high-low, .today .sunset-and-sunrise { display: flex; justify-content: space-around; }
+  .space-evenly-supported .today .extras, .space-evenly-supported .today .high-low, .space-evenly-supported .today .sunset-and-sunrise {
+    justify-content: space-evenly;
+  }
+  .today .high-low > *:not(.air-quality) { opacity: 0.8; }
+  .inline-icon { width: 2em; position: relative; } /* position relative, so the img can be absolute relative to its parent */
+  .inline-icon img { height: 2em; width: 2em; position: absolute; top: 0; left: 0; } /* pull it out of the document flow for sizing */
+  .inline-icon.invert { filter: invert(1); }
+  .today .extras .inline-icon img { margin-top: -0.2em; } /* adjust the icon height so it feels more inline */
+  .today .sunset-and-sunrise .inline-icon img { margin-top: -0.1em; } /* technically 0.2 is the same here too, but the horizon line is small, so this feels better */
+
+	.high-low .low::before {
+    content: "L: "
+  }
+  .high-low .high::before {
+    content: "H: "
+  }
+  
+  .today .air-quality { 
+    display:inline-block; border-radius: 3px; height: 1.5em; width: 1.5em; background: grey; 
+    text-shadow: 0 0 5px #00000099; font-weight: 500;
+    box-shadow: rgb(0 0 0 / 35%) 0px 5px 15px;
+    position: relative;
+	}
+  .air-quality.good { background: #5cc725; }
+	.air-quality.fair { background: #fab427; }
+	.air-quality.moderate { background: #f8861f; }
+	.air-quality.poor { background: #f72114; }
+  .air-quality.very-poor { background: #b32118; }
+
+  
+  .forecast td { padding: 0; }
+  /* .forecast .day { display: flex; justify-content: space-around; } */
+  /* .forecast .day { height: 16vh; } */ /* 1/6 height */
+  .forecast .day .weather-icon { width: 5vw; }
+  .forecast .day .weather-icon img { height: 10vh;  }
+
+
+  /* START: TEMPLATES */
+
+  /***************************
+   * 
+   * Template: default 
+   *
+   *****/
+  [data-layout="default"] .today { height: 90vh; width: 40vw; margin-right: 5vw; margin-top: 5vh; }
+	[data-layout="default"] .forecast { --number-of-items: 4; --font-size: calc(24vh / var(--number-of-items)); height: 90vh; width: 45vw; font-size: var(--font-size); margin-right: 5vw; margin-top: 5vh; }
+	[data-layout="default"] .today .temperature { margin-top: -2vh; margin-bottom: -2vh; padding-left: 3vw; }
+  [data-layout="default"] .sunset-and-sunrise { display: none; }
+  [data-layout="default"] .extras { display: none; }
+  [data-layout="default"] .location-name { display: none; }
+
+
+  
+  /***************************
+   * 
+   * Template: today-only 
+   *
+   *****/
+  [data-layout="today-only"] .today { width: 100vw; }
+  [data-layout="today-only"] .forecast { display: none; }
+  [data-layout="today-only"] .today .temperature { line-height: 1em; }
+  [data-layout="today-only"] .location-name { display: none; }
+
+
+  /***************************
+   * 
+   * Template: forecast-only 
+   *
+   *****/
+  [data-layout="forecast-only"] .today { display: none; }
+  [data-layout="forecast-only"] .forecast { width: 100vw; height:100vh; padding: 0 1.5em; --number-of-items: 4; --font-size: calc(24vh / var(--number-of-items)); font-size: var(--font-size); }
+  [data-layout="forecast-only"] .location-name { display: none; }
+
+
+  /***************************
+   * 
+   * Template: forecast-horizontal 
+   *
+   *****/
+  [data-layout="forecast-horizontal"] .today { display: none; }
+  [data-layout="forecast-horizontal"] .forecast { width: 100vw; }
+  [data-layout="forecast-horizontal"] .location-name { display: none; }
+
+
+  /* Apply flexbox to the table body and its rows */
+  [data-layout="forecast-horizontal"] .forecast {
+    height: calc(100% - 1.5em);
+    margin: 0.75em 0; 
+  }
+  [data-layout="forecast-horizontal"] .forecast tbody {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: space-around; /* fallback for old browsers */
+    /* Remove default table spacing and borders */
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+  /* newer browsers should support space-evenly */
+  [data-layout="forecast-horizontal"].space-evenly-supported .forecast tbody {
+    justify-content: space-evenly;
+  }
+  
+  
+  /* Style each table cell */
+  [data-layout="forecast-horizontal"] .forecast .day {
+    padding: 0.5em;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  
+  /* Center the content in each cell */
+  [data-layout="forecast-horizontal"] .forecast .day td {
+    text-align: center;
+  }
+  
+  /* Optionally, adjust styles for specific cells like day of the week, weather icon, high, and low */
+  [data-layout="forecast-horizontal"] .forecast .day-of-week {
+    font-size: calc(2 * var(--font-size));
+  }
+  
+  [data-layout="forecast-horizontal"] .forecast .day .weather-icon {
+    width: auto;
+  }
+  [data-layout="forecast-horizontal"] .forecast .day .weather-icon img {
+  	height: calc(var(--font-size) * 5)
+  }
+
+  [data-layout="forecast-horizontal"] .forecast .high {
+    font-size: calc(2.75 * var(--font-size));
+	}
+  
+  [data-layout="forecast-horizontal"] .forecast .low {
+    font-size: calc(1.75 * var(--font-size));
+    opacity: 0.8;
+    margin-top: -0.5em;
+    margin-bottom: 0.5em;
+  }
+
+
+  
+
+  /***************************
+   * 
+   * Template: today-wide 
+   *
+   *****/
+  /* Emulates the standard 'Weather' tile for devices */
+  [data-layout="today-wide"] {
+    --font-size: 8vh;
+    --line-height: calc(1.5 * var(--font-size));
+    --main-content-y: 22.5vh;
+    display: block!important;
+    font-size: var(--font-size);
+  }
+  [data-layout="today-wide"] .today { 
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+  }
+  [data-layout="today-wide"] .forecast { display: none; }
+
+  /* bottom-left corner */
+  /* descriptive weather summary */
+  [data-layout="today-wide"] .weather-summary { 
+    position: absolute;
+    text-align: left;
+    bottom: calc((3 * var(--1u)) + var(--line-height)); /* offset by the sunset/sunrise being below it */
+    left: calc(3 * var(--1u));
+  }
+  [data-layout="today-wide"] .sunset-and-sunrise { 
+    position: absolute;
+    text-align: left;
+    bottom: calc(3 * var(--1u));
+    left: calc(3 * var(--1u));
+  }
+
+
+  
+  /* bottom-right corner */
+  /* descriptive weather summary */
+  [data-layout="today-wide"] .extras { 
+    position: absolute;
+    bottom:  calc(3 * var(--1u));
+    right: calc(3 * var(--1u));
+  }
+  /* move the windspeed up to its own line above the percentages */
+  [data-layout="today-wide"] .extras .wind-speed { 
+    position: absolute;
+    bottom:  calc(var(--line-height)); /* offset by the sunset/sunrise being below it */
+    right: 0; /* already within the .extras, so right 'padding' is already there */
+  }
+
+
+
+  /* central content */
+  [data-layout="today-wide"] .weather-icon {
+    position: absolute;
+    top: calc(var(--main-content-y) - 2.5vh); /* split the difference of it being 5vh taller than the temperature */
+    right: 55vw;
+    height: calc(35 * var(--1u));
+    width: calc(35 * var(--1u));
+    padding-right: 2vw;
+  }
+  [data-layout="today-wide"] .today .weather-icon img { max-height: 100%; max-width: 100%; }
+  [data-layout="today-wide"] .temperature {
+    position: absolute;
+    top: var(--main-content-y);
+    left: 45vw;
+    line-height: 1em;
+    font-size: 30vh;
+  }
+  [data-layout="today-wide"] .overview {
+    position: absolute;
+    top: calc(var(--main-content-y) + 30vh); /* offset by the height of the temperature element */
+    left: 45vw;
+    padding-left: 2vw;
+  }
+  [data-layout="today-wide"] .feels-like {
+    text-transform: lowercase;
+    font-size: 85%;
+  }
+  [data-layout="today-wide"] .high-low {
+    display: none; /* TODO: make this optional */
+    position: absolute;
+    top: calc(var(--main-content-y) + 30vh + var(--line-height)); /* offset by the height of the temperature element + feels-like */
+    left: 45vw;
+    padding-left: 2vw;
+    font-size: 85%;
+  }
+  [data-layout="today-wide"] .high-low .low {
+    margin-left: 2vw;
+  }
+	[data-layout="today-wide"] .today .air-quality { 
+    border: 1px solid transparent;
+    text-shadow: none; /* reset to none */
+    box-shadow: none; /* reset to none */
+    background: none;
+    width: 3em; /* space for our prefix text */
+    /* positioning is a bit unique here since we are relative to the parent 'overview' box */
+    position: absolute;
+    left: calc(55vw - 2px - 3em - var(--3u)); /* see below for details on this calculation */
+    top: calc(-1 * var(--main-content-y) - 30vh + var(--3u)); /* reset to zero from the overview offset */
+	}
+  /* Explanation of left position for air-quality:
+  
+  The parent of .air-quality is .overview which is already absolute left 45vw, so we are positioned relative to that parent element
+   + Adding 55vw takes us to 100%
+   + Then we subtract the width of the border on the element 1px + 1px = 2px
+   + And substract the width of the element itself (3em fixed size)
+   + And remove any additional padding we want (--3u)
+   + 2px is right on the edge (accounting for borders), so we offset it by our default space amount 
+  
+  */
+  [data-layout="today-wide"] .air-quality.good { border-color: #5cc725; }
+	[data-layout="today-wide"] .air-quality.fair { border-color: #fab427; }
+	[data-layout="today-wide"] .air-quality.moderate { border-color: #f8861f; }
+	[data-layout="today-wide"] .air-quality.poor { border-color: #f72114; }
+  [data-layout="today-wide"] .air-quality.very-poor { border-color: #b32118; }
+  
+  [data-layout="today-wide"] span.air-quality::before {
+    content: "AQI: ";
+    font-size: 0.8em;
+    top: -0.1em;
+    display: inline-block;
+    position: relative;
+    padding-right: 0.25em;
+	}
+
+
+
+
+
+  /***************************
+   * 
+   * Template: today-mini 
+   *
+   *****/
+  [data-layout="today-mini"] .today { width: 100vw; }
+  [data-layout="today-mini"] .forecast { display: none; }
+  [data-layout="today-mini"] .today .temperature { line-height: 1em; }
+  [data-layout="today-mini"] .location-name { display: none; }
+  [data-layout="today-mini"] .overview { display: none; }
+  [data-layout="today-mini"] .sunset-and-sunrise { display: none; }
+  [data-layout="today-mini"] .extras { display: none; }
+  [data-layout="today-mini"] .weather-summary { display: none; }
+
+
+  [data-layout="today-mini"] .weather-icon { 
+    position: absolute;
+    left: 5vw;
+    top: 18vh;
+    height: 40vh;
+    width: 40vw;
+  }
+  [data-layout="today-mini"][data-temperature-digits="3"] .weather-icon { 
+    left: 2vw;
+    top: 22vh;
+    width: 37vw;
+  }
+  [data-layout="today-mini"] .weather-icon img {
+    max-width: 100%;
+    max-height: 100%;
+  }
+	[data-layout="today-mini"] .temperature {
+    position: absolute;
+    left: 47vw;
+    right: 5vw;
+    top: 24vh;
+    font-size: 30vh;
+  }
+  
+  [data-layout="today-mini"][data-temperature-digits="3"] .temperature {
+    left: 37vw;
+  	font-size: 26vh;
+    top: 26vh;
+  }
+  
+  [data-layout="today-mini"] .high-low {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    left: 25vw;
+    right: var(--3u);
+    top: 60vh;
+    font-size: 15vh;
+    --gap: 4vw;
+  }
+  [data-layout="today-mini"] .high {
+    padding-right: var(--gap);
+    order: 1;
+  }
+  [data-layout="today-mini"] .low {
+    padding-left: var(--gap);
+    order: 3;
+  }
+  [data-layout="today-mini"] .high::before, [data-layout="today-mini"] .low::before {
+    content: " ";
+  }
+  /* Put a pipe between them (border was too tall) */
+  [data-layout="today-mini"] .high-low::before {
+    content: " ";
+    order: 2;
+    margin-top: 2vh;
+    font-weight: 100;
+    opacity: 0.8;
+    border-right: 1px solid rgba(255,255,255,0.6);
+    height: 16vh;
+    width: 0px;
+    display: block;
+  }
+  
+
+  
+  /* END: TEMPLATES */
+
+  .error {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: #e11111;
+    padding: 0.5em 1em;
+    box-shadow: 0 0 10px 5px rgb(0 0 0 / 50%);
+  }
+
+  .hide { display: none; }
+</style>
+
+<script>
+  var noDecimal = new Intl.NumberFormat(navigator.language, { maximumFractionDigits: 0 });
+  function stripDecimal(v){
+    if(v != null && v !== false){
+      v = noDecimal.format(v)
+    }
+    return v;
+  }
+  function formatTemperature(v){ 
+    v = stripDecimal(v)
+    return (v || '') + '°'
+  }
+  function formatPercent(v){ 
+    v = stripDecimal(v)
+    return (v || '') + '%'
+  }
+
+  function isNullOrEmpty(v){ return v == null || v === "" };
+
+  var LANGUAGE_MAP = {"af":{"feels_like":"Hitte-indeks"},"al":{"feels_like":"ndjehet si"},"ar":{"feels_like":"مؤشر الحرارة"},"az":{"feels_like":"istilik indeksi"},"bg":{"feels_like":"топлинен индекс"},"ca":{"feels_like":"índex de calor"},"cz":{"feels_like":"zdánlivá teplota"},"da":{"feels_like":"Føles som"},"de":{"feels_like":"Hitzeindex"},"el":{"feels_like":"δείκτης θερμότητας"},"en":{"feels_like":"Feels Like"},"eu":{"feels_like":"bero-indizea"},"fa":{"feels_like":"شاخص گرما"},"fi":{"feels_like":"lämpöindeksi"},"fr":{"feels_like":"indice de chaleur"},"gl":{"feels_like":"índice de calor"},"he":{"feels_like":"מד חום"},"hi":{"feels_like":"ताप सूचकांक"},"hr":{"feels_like":"indeks topline"},"hu":{"feels_like":"hő index"},"id":{"feels_like":"Indeks panas"},"it":{"feels_like":"indice di calore"},"ja":{"feels_like":"暑さ指数"},"kr":{"feels_like":"열 지수"},"la":{"feels_like":"siltuma indekss"},"lt":{"feels_like":"šilumos indeksas"},"mk":{"feels_like":"индекс на топлина"},"no":{"feels_like":"varmeindeks"},"nl":{"feels_like":"warmte-index"},"pl":{"feels_like":"indeks ciepła"},"pt":{"feels_like":"índice de calor"},"pt_br":{"feels_like":"índice de calor"},"ro":{"feels_like":"Index de caldura"},"ru":{"feels_like":"тепловой индекс"},"sv":{"feels_like":"värmeindex"},"se":{"feels_like":"värmeindex"},"sk":{"feels_like":"tepelný index"},"sl":{"feels_like":"toplotni indeks"},"sp":{"feels_like":"índice de calor"},"es":{"feels_like":"índice de calor"},"sr":{"feels_like":"топлотни индекс"},"th":{"feels_like":"ดัชนีความร้อน"},"tr":{"feels_like":"ısı indeksi"},"ua":{"feels_like":"індекс тепла"},"uk":{"feels_like":"індекс тепла"},"vi":{"feels_like":"chỉ số nhiệt"},"zh_cn":{"feels_like":"热度指数"},"zh_tw":{"feels_like":"熱度指數"},"zu":{"feels_like":"uzizwa"}};
+  var METEO_CODE_TO_NAME = {
+    "01d": "clear-day", //clear
+    "01n": "clear-night",
+    "02d": "overcast-day", //clouds
+    "02n": "overcast-night",
+    "03d": "cloudy", //scattered clouds
+    "03n": "cloudy",
+    "04d": "overcast", //broken clouds
+    "04n": "overcast",
+    "09d": "rain", //shower rain
+    "09n": "rain",
+    "10d": "partly-cloudy-day-rain", //rain
+    "10n": "partly-cloudy-night-rain",
+    "11d": "thunderstorms", //thunderstorm
+    "11n": "thunderstorms",
+    "13d": "snow", //snow
+    "13n": "snow",
+    "50d": "mist", //mist/fog
+    "50n": "mist"
+  };
+
+  // WMO Weather interpretation codes (used by Open-Meteo)
+  // See: https://open-meteo.com/en/docs#weathervariables
+  var WMO_CODE_MAP = {
+    0:  { day: 'clear-day', night: 'clear-night', key: 'clear' },
+    1:  { day: 'clear-day', night: 'clear-night', key: 'mainly_clear' },
+    2:  { day: 'partly-cloudy-day', night: 'partly-cloudy-night', key: 'partly_cloudy' },
+    3:  { day: 'overcast', night: 'overcast', key: 'overcast' },
+    45: { day: 'fog', night: 'fog', key: 'fog' },
+    48: { day: 'fog', night: 'fog', key: 'freezing_fog' },
+    51: { day: 'drizzle', night: 'drizzle', key: 'light_drizzle' },
+    53: { day: 'drizzle', night: 'drizzle', key: 'moderate_drizzle' },
+    55: { day: 'drizzle', night: 'drizzle', key: 'dense_drizzle' },
+    56: { day: 'sleet', night: 'sleet', key: 'freezing_drizzle' },
+    57: { day: 'sleet', night: 'sleet', key: 'freezing_drizzle' },
+    61: { day: 'partly-cloudy-day-rain', night: 'partly-cloudy-night-rain', key: 'slight_rain' },
+    63: { day: 'rain', night: 'rain', key: 'moderate_rain' },
+    65: { day: 'rain', night: 'rain', key: 'heavy_rain' },
+    66: { day: 'sleet', night: 'sleet', key: 'light_freezing_rain' },
+    67: { day: 'sleet', night: 'sleet', key: 'heavy_freezing_rain' },
+    71: { day: 'snow', night: 'snow', key: 'slight_snow' },
+    73: { day: 'snow', night: 'snow', key: 'moderate_snow' },
+    75: { day: 'snow', night: 'snow', key: 'heavy_snow' },
+    77: { day: 'snow', night: 'snow', key: 'snow_grains' },
+    80: { day: 'partly-cloudy-day-rain', night: 'partly-cloudy-night-rain', key: 'slight_rain_showers' },
+    81: { day: 'rain', night: 'rain', key: 'moderate_rain_showers' },
+    82: { day: 'rain', night: 'rain', key: 'violent_rain_showers' },
+    85: { day: 'snow', night: 'snow', key: 'slight_snow_showers' },
+    86: { day: 'snow', night: 'snow', key: 'heavy_snow_showers' },
+    95: { day: 'thunderstorms', night: 'thunderstorms', key: 'thunderstorm' },
+    96: { day: 'thunderstorms', night: 'thunderstorms', key: 'thunderstorm_slight_hail' },
+    99: { day: 'thunderstorms', night: 'thunderstorms', key: 'thunderstorm_heavy_hail' }
+  };
+
+  // Weather description translations for WMO codes
+  var WMO_DESCRIPTIONS = {
+    "en": {
+      "clear": "Clear sky",
+      "mainly_clear": "Mainly clear",
+      "partly_cloudy": "Partly cloudy",
+      "overcast": "Overcast",
+      "fog": "Fog",
+      "freezing_fog": "Freezing fog",
+      "light_drizzle": "Light drizzle",
+      "moderate_drizzle": "Drizzle",
+      "dense_drizzle": "Dense drizzle",
+      "freezing_drizzle": "Freezing drizzle",
+      "slight_rain": "Light rain",
+      "moderate_rain": "Rain",
+      "heavy_rain": "Heavy rain",
+      "light_freezing_rain": "Light freezing rain",
+      "heavy_freezing_rain": "Freezing rain",
+      "slight_snow": "Light snow",
+      "moderate_snow": "Snow",
+      "heavy_snow": "Heavy snow",
+      "snow_grains": "Snow grains",
+      "slight_rain_showers": "Light showers",
+      "moderate_rain_showers": "Showers",
+      "violent_rain_showers": "Heavy showers",
+      "slight_snow_showers": "Light snow showers",
+      "heavy_snow_showers": "Snow showers",
+      "thunderstorm": "Thunderstorm",
+      "thunderstorm_slight_hail": "Thunderstorm with hail",
+      "thunderstorm_heavy_hail": "Thunderstorm with heavy hail"
+    },
+    "de": {
+      "clear": "Klarer Himmel",
+      "mainly_clear": "Überwiegend klar",
+      "partly_cloudy": "Teilweise bewölkt",
+      "overcast": "Bedeckt",
+      "fog": "Nebel",
+      "freezing_fog": "Gefrierender Nebel",
+      "light_drizzle": "Leichter Nieselregen",
+      "moderate_drizzle": "Nieselregen",
+      "dense_drizzle": "Starker Nieselregen",
+      "freezing_drizzle": "Gefrierender Nieselregen",
+      "slight_rain": "Leichter Regen",
+      "moderate_rain": "Regen",
+      "heavy_rain": "Starker Regen",
+      "light_freezing_rain": "Leichter gefrierender Regen",
+      "heavy_freezing_rain": "Gefrierender Regen",
+      "slight_snow": "Leichter Schneefall",
+      "moderate_snow": "Schneefall",
+      "heavy_snow": "Starker Schneefall",
+      "snow_grains": "Schneegriesel",
+      "slight_rain_showers": "Leichte Schauer",
+      "moderate_rain_showers": "Schauer",
+      "violent_rain_showers": "Starke Schauer",
+      "slight_snow_showers": "Leichte Schneeschauer",
+      "heavy_snow_showers": "Schneeschauer",
+      "thunderstorm": "Gewitter",
+      "thunderstorm_slight_hail": "Gewitter mit Hagel",
+      "thunderstorm_heavy_hail": "Gewitter mit starkem Hagel"
+    },
+    "es": {
+      "clear": "Cielo despejado",
+      "mainly_clear": "Mayormente despejado",
+      "partly_cloudy": "Parcialmente nublado",
+      "overcast": "Nublado",
+      "fog": "Niebla",
+      "freezing_fog": "Niebla helada",
+      "light_drizzle": "Llovizna ligera",
+      "moderate_drizzle": "Llovizna",
+      "dense_drizzle": "Llovizna intensa",
+      "freezing_drizzle": "Llovizna helada",
+      "slight_rain": "Lluvia ligera",
+      "moderate_rain": "Lluvia",
+      "heavy_rain": "Lluvia intensa",
+      "light_freezing_rain": "Lluvia helada ligera",
+      "heavy_freezing_rain": "Lluvia helada",
+      "slight_snow": "Nevada ligera",
+      "moderate_snow": "Nevada",
+      "heavy_snow": "Nevada intensa",
+      "snow_grains": "Granizo fino",
+      "slight_rain_showers": "Chubascos ligeros",
+      "moderate_rain_showers": "Chubascos",
+      "violent_rain_showers": "Chubascos intensos",
+      "slight_snow_showers": "Chubascos de nieve ligeros",
+      "heavy_snow_showers": "Chubascos de nieve",
+      "thunderstorm": "Tormenta",
+      "thunderstorm_slight_hail": "Tormenta con granizo",
+      "thunderstorm_heavy_hail": "Tormenta con granizo intenso"
+    },
+    "fr": {
+      "clear": "Ciel dégagé",
+      "mainly_clear": "Majoritairement dégagé",
+      "partly_cloudy": "Partiellement nuageux",
+      "overcast": "Couvert",
+      "fog": "Brouillard",
+      "freezing_fog": "Brouillard givrant",
+      "light_drizzle": "Bruine légère",
+      "moderate_drizzle": "Bruine",
+      "dense_drizzle": "Bruine dense",
+      "freezing_drizzle": "Bruine verglaçante",
+      "slight_rain": "Pluie légère",
+      "moderate_rain": "Pluie",
+      "heavy_rain": "Pluie forte",
+      "light_freezing_rain": "Pluie verglaçante légère",
+      "heavy_freezing_rain": "Pluie verglaçante",
+      "slight_snow": "Neige légère",
+      "moderate_snow": "Neige",
+      "heavy_snow": "Neige forte",
+      "snow_grains": "Grésil",
+      "slight_rain_showers": "Averses légères",
+      "moderate_rain_showers": "Averses",
+      "violent_rain_showers": "Averses violentes",
+      "slight_snow_showers": "Averses de neige légères",
+      "heavy_snow_showers": "Averses de neige",
+      "thunderstorm": "Orage",
+      "thunderstorm_slight_hail": "Orage avec grêle",
+      "thunderstorm_heavy_hail": "Orage avec forte grêle"
+    },
+    "it": {
+      "clear": "Cielo sereno",
+      "mainly_clear": "Prevalentemente sereno",
+      "partly_cloudy": "Parzialmente nuvoloso",
+      "overcast": "Coperto",
+      "fog": "Nebbia",
+      "freezing_fog": "Nebbia gelata",
+      "light_drizzle": "Pioggerella leggera",
+      "moderate_drizzle": "Pioggerella",
+      "dense_drizzle": "Pioggerella intensa",
+      "freezing_drizzle": "Pioggerella gelata",
+      "slight_rain": "Pioggia leggera",
+      "moderate_rain": "Pioggia",
+      "heavy_rain": "Pioggia intensa",
+      "light_freezing_rain": "Pioggia gelata leggera",
+      "heavy_freezing_rain": "Pioggia gelata",
+      "slight_snow": "Neve leggera",
+      "moderate_snow": "Neve",
+      "heavy_snow": "Neve intensa",
+      "snow_grains": "Nevischio",
+      "slight_rain_showers": "Rovesci leggeri",
+      "moderate_rain_showers": "Rovesci",
+      "violent_rain_showers": "Rovesci intensi",
+      "slight_snow_showers": "Rovesci di neve leggeri",
+      "heavy_snow_showers": "Rovesci di neve",
+      "thunderstorm": "Temporale",
+      "thunderstorm_slight_hail": "Temporale con grandine",
+      "thunderstorm_heavy_hail": "Temporale con grandine intensa"
+    },
+    "nl": {
+      "clear": "Onbewolkt",
+      "mainly_clear": "Overwegend helder",
+      "partly_cloudy": "Gedeeltelijk bewolkt",
+      "overcast": "Bewolkt",
+      "fog": "Mist",
+      "freezing_fog": "Aanvriezende mist",
+      "light_drizzle": "Lichte motregen",
+      "moderate_drizzle": "Motregen",
+      "dense_drizzle": "Dichte motregen",
+      "freezing_drizzle": "Aanvriezende motregen",
+      "slight_rain": "Lichte regen",
+      "moderate_rain": "Regen",
+      "heavy_rain": "Zware regen",
+      "light_freezing_rain": "Lichte ijzel",
+      "heavy_freezing_rain": "IJzel",
+      "slight_snow": "Lichte sneeuw",
+      "moderate_snow": "Sneeuw",
+      "heavy_snow": "Zware sneeuw",
+      "snow_grains": "Sneeuwkorrels",
+      "slight_rain_showers": "Lichte buien",
+      "moderate_rain_showers": "Buien",
+      "violent_rain_showers": "Zware buien",
+      "slight_snow_showers": "Lichte sneeuwbuien",
+      "heavy_snow_showers": "Sneeuwbuien",
+      "thunderstorm": "Onweer",
+      "thunderstorm_slight_hail": "Onweer met hagel",
+      "thunderstorm_heavy_hail": "Onweer met zware hagel"
+    },
+    "da": {
+      "clear": "Klar himmel",
+      "mainly_clear": "Overvejende klart",
+      "partly_cloudy": "Delvist skyet",
+      "overcast": "Overskyet",
+      "fog": "Tåge",
+      "freezing_fog": "Frysende tåge",
+      "light_drizzle": "Let støvregn",
+      "moderate_drizzle": "Støvregn",
+      "dense_drizzle": "Tæt støvregn",
+      "freezing_drizzle": "Frysende støvregn",
+      "slight_rain": "Let regn",
+      "moderate_rain": "Regn",
+      "heavy_rain": "Kraftig regn",
+      "light_freezing_rain": "Let isslag",
+      "heavy_freezing_rain": "Isslag",
+      "slight_snow": "Let sne",
+      "moderate_snow": "Sne",
+      "heavy_snow": "Kraftig sne",
+      "snow_grains": "Snekorn",
+      "slight_rain_showers": "Lette byger",
+      "moderate_rain_showers": "Byger",
+      "violent_rain_showers": "Kraftige byger",
+      "slight_snow_showers": "Lette snebyger",
+      "heavy_snow_showers": "Snebyger",
+      "thunderstorm": "Tordenvejr",
+      "thunderstorm_slight_hail": "Tordenvejr med hagl",
+      "thunderstorm_heavy_hail": "Tordenvejr med kraftig hagl"
+    },
+    "pl": {
+      "clear": "Bezchmurnie",
+      "mainly_clear": "Przeważnie bezchmurnie",
+      "partly_cloudy": "Częściowe zachmurzenie",
+      "overcast": "Pochmurno",
+      "fog": "Mgła",
+      "freezing_fog": "Marznąca mgła",
+      "light_drizzle": "Lekka mżawka",
+      "moderate_drizzle": "Mżawka",
+      "dense_drizzle": "Gęsta mżawka",
+      "freezing_drizzle": "Marznąca mżawka",
+      "slight_rain": "Lekki deszcz",
+      "moderate_rain": "Deszcz",
+      "heavy_rain": "Silny deszcz",
+      "light_freezing_rain": "Lekki marznący deszcz",
+      "heavy_freezing_rain": "Marznący deszcz",
+      "slight_snow": "Lekki śnieg",
+      "moderate_snow": "Śnieg",
+      "heavy_snow": "Intensywny śnieg",
+      "snow_grains": "Ziarna śniegu",
+      "slight_rain_showers": "Lekkie przelotne opady",
+      "moderate_rain_showers": "Przelotne opady",
+      "violent_rain_showers": "Silne przelotne opady",
+      "slight_snow_showers": "Lekkie przelotne opady śniegu",
+      "heavy_snow_showers": "Przelotne opady śniegu",
+      "thunderstorm": "Burza",
+      "thunderstorm_slight_hail": "Burza z gradem",
+      "thunderstorm_heavy_hail": "Burza z silnym gradem"
+    },
+    "pt": {
+      "clear": "Céu limpo",
+      "mainly_clear": "Predominantemente limpo",
+      "partly_cloudy": "Parcialmente nublado",
+      "overcast": "Nublado",
+      "fog": "Nevoeiro",
+      "freezing_fog": "Nevoeiro gelado",
+      "light_drizzle": "Chuvisco leve",
+      "moderate_drizzle": "Chuvisco",
+      "dense_drizzle": "Chuvisco intenso",
+      "freezing_drizzle": "Chuvisco gelado",
+      "slight_rain": "Chuva leve",
+      "moderate_rain": "Chuva",
+      "heavy_rain": "Chuva forte",
+      "light_freezing_rain": "Chuva gelada leve",
+      "heavy_freezing_rain": "Chuva gelada",
+      "slight_snow": "Neve leve",
+      "moderate_snow": "Neve",
+      "heavy_snow": "Neve forte",
+      "snow_grains": "Grãos de neve",
+      "slight_rain_showers": "Aguaceiros leves",
+      "moderate_rain_showers": "Aguaceiros",
+      "violent_rain_showers": "Aguaceiros fortes",
+      "slight_snow_showers": "Aguaceiros de neve leves",
+      "heavy_snow_showers": "Aguaceiros de neve",
+      "thunderstorm": "Trovoada",
+      "thunderstorm_slight_hail": "Trovoada com granizo",
+      "thunderstorm_heavy_hail": "Trovoada com granizo forte"
+    },
+    "ru": {
+      "clear": "Ясно",
+      "mainly_clear": "Преимущественно ясно",
+      "partly_cloudy": "Переменная облачность",
+      "overcast": "Пасмурно",
+      "fog": "Туман",
+      "freezing_fog": "Ледяной туман",
+      "light_drizzle": "Лёгкая морось",
+      "moderate_drizzle": "Морось",
+      "dense_drizzle": "Сильная морось",
+      "freezing_drizzle": "Ледяная морось",
+      "slight_rain": "Небольшой дождь",
+      "moderate_rain": "Дождь",
+      "heavy_rain": "Сильный дождь",
+      "light_freezing_rain": "Слабый ледяной дождь",
+      "heavy_freezing_rain": "Ледяной дождь",
+      "slight_snow": "Небольшой снег",
+      "moderate_snow": "Снег",
+      "heavy_snow": "Сильный снег",
+      "snow_grains": "Снежная крупа",
+      "slight_rain_showers": "Небольшие ливни",
+      "moderate_rain_showers": "Ливни",
+      "violent_rain_showers": "Сильные ливни",
+      "slight_snow_showers": "Небольшой снегопад",
+      "heavy_snow_showers": "Снегопад",
+      "thunderstorm": "Гроза",
+      "thunderstorm_slight_hail": "Гроза с градом",
+      "thunderstorm_heavy_hail": "Гроза с сильным градом"
+    },
+    "sv": {
+      "clear": "Klart",
+      "mainly_clear": "Mestadels klart",
+      "partly_cloudy": "Delvis molnigt",
+      "overcast": "Mulet",
+      "fog": "Dimma",
+      "freezing_fog": "Underkyld dimma",
+      "light_drizzle": "Lätt duggregn",
+      "moderate_drizzle": "Duggregn",
+      "dense_drizzle": "Tätt duggregn",
+      "freezing_drizzle": "Underkylt duggregn",
+      "slight_rain": "Lätt regn",
+      "moderate_rain": "Regn",
+      "heavy_rain": "Kraftigt regn",
+      "light_freezing_rain": "Lätt underkylt regn",
+      "heavy_freezing_rain": "Underkylt regn",
+      "slight_snow": "Lätt snö",
+      "moderate_snow": "Snö",
+      "heavy_snow": "Kraftigt snöfall",
+      "snow_grains": "Snökorn",
+      "slight_rain_showers": "Lätta skurar",
+      "moderate_rain_showers": "Skurar",
+      "violent_rain_showers": "Kraftiga skurar",
+      "slight_snow_showers": "Lätta snöbyar",
+      "heavy_snow_showers": "Snöbyar",
+      "thunderstorm": "Åskväder",
+      "thunderstorm_slight_hail": "Åskväder med hagel",
+      "thunderstorm_heavy_hail": "Åskväder med kraftigt hagel"
+    },
+    "he": {
+      "clear": "שמיים בהירים",
+      "mainly_clear": "בהיר ברובו",
+      "partly_cloudy": "מעונן חלקית",
+      "overcast": "מעונן",
+      "fog": "ערפל",
+      "freezing_fog": "ערפל קופא",
+      "light_drizzle": "טפטוף קל",
+      "moderate_drizzle": "טפטוף",
+      "dense_drizzle": "טפטוף כבד",
+      "freezing_drizzle": "טפטוף קופא",
+      "slight_rain": "גשם קל",
+      "moderate_rain": "גשם",
+      "heavy_rain": "גשם כבד",
+      "light_freezing_rain": "גשם קופא קל",
+      "heavy_freezing_rain": "גשם קופא",
+      "slight_snow": "שלג קל",
+      "moderate_snow": "שלג",
+      "heavy_snow": "שלג כבד",
+      "snow_grains": "גרגרי שלג",
+      "slight_rain_showers": "ממטרים קלים",
+      "moderate_rain_showers": "ממטרים",
+      "violent_rain_showers": "ממטרים כבדים",
+      "slight_snow_showers": "ממטרי שלג קלים",
+      "heavy_snow_showers": "ממטרי שלג",
+      "thunderstorm": "סופת רעמים",
+      "thunderstorm_slight_hail": "סופת רעמים עם ברד",
+      "thunderstorm_heavy_hail": "סופת רעמים עם ברד כבד"
+    },
+    "ja": {
+      "clear": "快晴",
+      "mainly_clear": "おおむね晴れ",
+      "partly_cloudy": "晴れ時々曇り",
+      "overcast": "曇り",
+      "fog": "霧",
+      "freezing_fog": "着氷性の霧",
+      "light_drizzle": "小雨",
+      "moderate_drizzle": "霧雨",
+      "dense_drizzle": "濃い霧雨",
+      "freezing_drizzle": "着氷性の霧雨",
+      "slight_rain": "弱い雨",
+      "moderate_rain": "雨",
+      "heavy_rain": "大雨",
+      "light_freezing_rain": "弱い着氷性の雨",
+      "heavy_freezing_rain": "着氷性の雨",
+      "slight_snow": "小雪",
+      "moderate_snow": "雪",
+      "heavy_snow": "大雪",
+      "snow_grains": "雪あられ",
+      "slight_rain_showers": "弱いにわか雨",
+      "moderate_rain_showers": "にわか雨",
+      "violent_rain_showers": "激しいにわか雨",
+      "slight_snow_showers": "弱いにわか雪",
+      "heavy_snow_showers": "にわか雪",
+      "thunderstorm": "雷雨",
+      "thunderstorm_slight_hail": "雷雨（ひょうを伴う）",
+      "thunderstorm_heavy_hail": "雷雨（激しいひょうを伴う）"
+    },
+    "ko": {
+      "clear": "맑음",
+      "mainly_clear": "대체로 맑음",
+      "partly_cloudy": "구름 조금",
+      "overcast": "흐림",
+      "fog": "안개",
+      "freezing_fog": "어는 안개",
+      "light_drizzle": "가벼운 이슬비",
+      "moderate_drizzle": "이슬비",
+      "dense_drizzle": "짙은 이슬비",
+      "freezing_drizzle": "어는 이슬비",
+      "slight_rain": "약한 비",
+      "moderate_rain": "비",
+      "heavy_rain": "강한 비",
+      "light_freezing_rain": "약한 어는 비",
+      "heavy_freezing_rain": "어는 비",
+      "slight_snow": "약한 눈",
+      "moderate_snow": "눈",
+      "heavy_snow": "강한 눈",
+      "snow_grains": "싸락눈",
+      "slight_rain_showers": "약한 소나기",
+      "moderate_rain_showers": "소나기",
+      "violent_rain_showers": "강한 소나기",
+      "slight_snow_showers": "약한 눈 소나기",
+      "heavy_snow_showers": "눈 소나기",
+      "thunderstorm": "뇌우",
+      "thunderstorm_slight_hail": "뇌우 (우박 동반)",
+      "thunderstorm_heavy_hail": "뇌우 (강한 우박 동반)"
+    },
+    "zh_cn": {
+      "clear": "晴朗",
+      "mainly_clear": "大部分晴朗",
+      "partly_cloudy": "局部多云",
+      "overcast": "阴天",
+      "fog": "雾",
+      "freezing_fog": "冻雾",
+      "light_drizzle": "小毛毛雨",
+      "moderate_drizzle": "毛毛雨",
+      "dense_drizzle": "浓毛毛雨",
+      "freezing_drizzle": "冻毛毛雨",
+      "slight_rain": "小雨",
+      "moderate_rain": "中雨",
+      "heavy_rain": "大雨",
+      "light_freezing_rain": "小冻雨",
+      "heavy_freezing_rain": "冻雨",
+      "slight_snow": "小雪",
+      "moderate_snow": "中雪",
+      "heavy_snow": "大雪",
+      "snow_grains": "雪粒",
+      "slight_rain_showers": "小阵雨",
+      "moderate_rain_showers": "阵雨",
+      "violent_rain_showers": "强阵雨",
+      "slight_snow_showers": "小阵雪",
+      "heavy_snow_showers": "阵雪",
+      "thunderstorm": "雷暴",
+      "thunderstorm_slight_hail": "雷暴伴小冰雹",
+      "thunderstorm_heavy_hail": "雷暴伴冰雹"
+    },
+    "zh_tw": {
+      "clear": "晴朗",
+      "mainly_clear": "大部分晴朗",
+      "partly_cloudy": "局部多雲",
+      "overcast": "陰天",
+      "fog": "霧",
+      "freezing_fog": "凍霧",
+      "light_drizzle": "小毛毛雨",
+      "moderate_drizzle": "毛毛雨",
+      "dense_drizzle": "濃毛毛雨",
+      "freezing_drizzle": "凍毛毛雨",
+      "slight_rain": "小雨",
+      "moderate_rain": "中雨",
+      "heavy_rain": "大雨",
+      "light_freezing_rain": "小凍雨",
+      "heavy_freezing_rain": "凍雨",
+      "slight_snow": "小雪",
+      "moderate_snow": "中雪",
+      "heavy_snow": "大雪",
+      "snow_grains": "雪粒",
+      "slight_rain_showers": "小陣雨",
+      "moderate_rain_showers": "陣雨",
+      "violent_rain_showers": "強陣雨",
+      "slight_snow_showers": "小陣雪",
+      "heavy_snow_showers": "陣雪",
+      "thunderstorm": "雷暴",
+      "thunderstorm_slight_hail": "雷暴伴小冰雹",
+      "thunderstorm_heavy_hail": "雷暴伴冰雹"
+    }
+  };
+
+  // Map US AQI (0-500) to 1-5 scale matching OWM
+  function mapUsAqiToIndex(usAqi) {
+    if (usAqi == null) return null;
+    if (usAqi <= 50) return 1;   // Good
+    if (usAqi <= 100) return 2;  // Fair (Moderate)
+    if (usAqi <= 150) return 3;  // Moderate (Unhealthy for Sensitive Groups)
+    if (usAqi <= 200) return 4;  // Poor (Unhealthy)
+    return 5;                     // Very Poor (Very Unhealthy / Hazardous)
+  }
+
+  // Get weather description from WMO code
+  function getWmoDescription(code, lang) {
+    var descriptions = WMO_DESCRIPTIONS[lang] || WMO_DESCRIPTIONS['en'];
+    var mapping = WMO_CODE_MAP[code];
+    if (mapping && descriptions[mapping.key]) {
+      return descriptions[mapping.key];
+    }
+    return 'Unknown';
+  }
+
+  // Get icon name from WMO code
+  function getWmoIcon(code, isDay) {
+    var mapping = WMO_CODE_MAP[code];
+    if (!mapping) return 'not-available';
+    return isDay ? mapping.day : mapping.night;
+  }
+
+  //=============================================================================
+  // WEATHER PROVIDERS
+  // Each provider implements: fetchWeather(), fetchAqi(), fetchLocationName()
+  //=============================================================================
+
+  /**
+   * Create an Open-Meteo weather provider (no API key required)
+   */
+  function createOpenMeteoProvider(config) {
+    var FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+    var AQI_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
+    var GEOCODE_URL = 'https://photon.komoot.io/reverse';
+
+    function buildBaseParams() {
+      var params = '?latitude=' + config.lat + '&longitude=' + config.lon + '&timezone=auto';
+      if (config.units === 'imperial') {
+        params += '&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch';
+      } else {
+        // Use m/s for wind speed to match OWM's metric units
+        params += '&windspeed_unit=ms';
+      }
+      return params;
+    }
+
+    return {
+      requiresApiKey: false,
+
+      fetchWeather: function() {
+        var params = buildBaseParams();
+        params += '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day';
+        params += '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset';
+        params += '&forecast_days=7';
+
+        var lang = config.lang || 'en';
+
+        return axios.get(FORECAST_URL + params).then(function(response) {
+          var data = response.data;
+          var current = data.current;
+          var daily = data.daily;
+          var isDay = current.is_day === 1;
+
+          // Normalize current weather to match expected structure
+          var normalizedCurrent = {
+            temp: current.temperature_2m,
+            feels_like: current.apparent_temperature,
+            humidity: current.relative_humidity_2m,
+            wind_speed: current.wind_speed_10m,
+            sunrise: new Date(daily.sunrise[0]).getTime() / 1000,
+            sunset: new Date(daily.sunset[0]).getTime() / 1000,
+            temp_max: daily.temperature_2m_max[0],
+            temp_min: daily.temperature_2m_min[0],
+            weather: [{
+              icon: getWmoIcon(current.weather_code, isDay),
+              description: getWmoDescription(current.weather_code, lang)
+            }]
+          };
+
+          // Normalize daily forecast
+          var normalizedDaily = [];
+          for (var i = 0; i < daily.time.length; i++) {
+            normalizedDaily.push({
+              dt: new Date(daily.time[i]).getTime() / 1000,
+              temp: {
+                max: daily.temperature_2m_max[i],
+                min: daily.temperature_2m_min[i]
+              },
+              weather: [{
+                icon: getWmoIcon(daily.weather_code[i], true) // Use day icon for forecast
+              }],
+              pop: daily.precipitation_probability_max[i] != null
+                ? daily.precipitation_probability_max[i] / 100
+                : null
+            });
+          }
+
+          return {
+            current: normalizedCurrent,
+            daily: normalizedDaily
+          };
+        });
+      },
+
+      fetchAqi: function() {
+        var params = '?latitude=' + config.lat + '&longitude=' + config.lon + '&current=us_aqi';
+
+        return axios.get(AQI_URL + params).then(function(response) {
+          var usAqi = response.data.current && response.data.current.us_aqi;
+          return { main: { aqi: mapUsAqiToIndex(usAqi) } };
+        }).catch(function(err) {
+          console.warn('Failed to fetch AQI from Open-Meteo:', err);
+          return null;
+        });
+      },
+
+      fetchLocationName: function() {
+        // Check cache first
+        var cacheKey = 'photon_reverseGeo_' + config.lat + '_' + config.lon;
+        var cached = localStorage.getItem(cacheKey);
+
+        if (cached) {
+          try {
+            var cachedData = JSON.parse(cached);
+            if (cachedData && cachedData.name) {
+              console.debug('Using cached location name (Photon):', cachedData.name);
+              return Promise.resolve(cachedData.name);
+            }
+          } catch (e) {
+            console.warn('Error parsing cached Photon result:', e);
+          }
+        }
+
+        // Fetch from Photon
+        var params = '?lon=' + config.lon + '&lat=' + config.lat + '&limit=1';
+
+        return axios.get(GEOCODE_URL + params).then(function(response) {
+          var features = response.data && response.data.features;
+          if (!features || features.length === 0) {
+            return null;
+          }
+
+          var props = features[0].properties;
+          var name = props.name || props.city || props.county || props.state;
+
+          if (name) {
+            // Cache the result
+            localStorage.setItem(cacheKey, JSON.stringify({ name: name }));
+            console.log('Location name from Photon:', name);
+          }
+
+          return name;
+        }).catch(function(err) {
+          console.warn('Failed to fetch location name from Photon:', err);
+          return null;
+        });
+      }
+    };
+  }
+
+  /**
+   * Create an OpenWeatherMap 2.5 Multi-endpoint provider
+   * Uses /weather + /forecast endpoints with Open-Meteo enrichment for today's high/low
+   */
+  function createOWMMultiProvider(config) {
+    var BASE_URL = 'https://api.openweathermap.org/data/2.5';
+
+    function buildParams() {
+      var params = '?lat=' + config.lat + '&lon=' + config.lon + '&appid=' + config.apiKey + '&units=' + config.units;
+      if (config.lang) {
+        params += '&lang=' + config.lang;
+      }
+      return params;
+    }
+
+    function buildOpenMeteoParams() {
+      var params = '?latitude=' + config.lat + '&longitude=' + config.lon + '&timezone=auto';
+      if (config.units === 'imperial') {
+        params += '&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch';
+      }
+      return params;
+    }
+
+    function getMostOftenElement(array) {
+      if (array.length === 0) return null;
+      var modeMap = {};
+      var maxEl = array[0], maxCount = 1;
+      for (var i = 0; i < array.length; i++) {
+        var el = array[i];
+        if (modeMap[el] == null) modeMap[el] = 1;
+        else modeMap[el]++;
+        if (modeMap[el] > maxCount) {
+          maxEl = el;
+          maxCount = modeMap[el];
+        }
+      }
+      return maxEl;
+    }
+
+    function mergeForecast(data) {
+      var grouping = {};
+      var ONE_DAY = 24 * 60 * 60 * 1000;
+      var now = new Date();
+
+      for (var i = 0; i < 7; i++) {
+        var dt = new Date(now.valueOf() + (i * ONE_DAY));
+        var key = dt.getDate();
+        grouping[key] = { items: [], timestamp: dt };
+      }
+
+      for (var j = 0; j < data.length; j++) {
+        var item = data[j];
+        var itemDt = new Date(item.dt * 1000);
+        var itemKey = itemDt.getDate();
+        if (grouping[itemKey]) {
+          grouping[itemKey].items.push(item);
+        }
+      }
+
+      var formatted = [];
+      for (var k in grouping) {
+        var items = grouping[k].items;
+        if (items.length === 0) continue;
+
+        var icons = items.map(function(it) { return it.weather[0].icon; });
+        var mins = items.map(function(it) { return it.main.temp_min; });
+        var maxes = items.map(function(it) { return it.main.temp_max; });
+        var pops = items.map(function(it) { return it.pop; });
+
+        var dayIcons = icons.filter(function(ic) { return ic[2] !== 'n'; });
+
+        mins.sort(function(a, b) { return a - b; });
+        maxes.sort(function(a, b) { return a - b; });
+        pops.sort(function(a, b) { return a - b; });
+
+        formatted.push({
+          dt: grouping[k].timestamp.valueOf() / 1000,
+          weather: [{ icon: getMostOftenElement(dayIcons) || icons[0] }],
+          temp: {
+            max: maxes[maxes.length - 1],
+            min: mins[0]
+          },
+          pop: pops[pops.length - 1]
+        });
+      }
+
+      formatted.sort(function(a, b) { return a.dt - b.dt; });
+      return formatted;
+    }
+
+    return {
+      requiresApiKey: true,
+
+      fetchWeather: function() {
+        var weatherUrl = BASE_URL + '/weather' + buildParams();
+        var forecastUrl = BASE_URL + '/forecast' + buildParams();
+
+        // Also fetch today's high/low from Open-Meteo (workaround for OWM 2.5 limitation)
+        var meteoUrl = 'https://api.open-meteo.com/v1/forecast' + buildOpenMeteoParams() +
+          '&daily=temperature_2m_max,temperature_2m_min&forecast_days=1';
+
+        var weatherPromise = axios.get(weatherUrl);
+        var forecastPromise = axios.get(forecastUrl);
+        var meteoPromise = axios.get(meteoUrl);
+
+        return Promise.allSettled([weatherPromise, forecastPromise, meteoPromise]).then(function(results) {
+          var weatherResult = results[0].status === 'fulfilled' ? results[0].value : null;
+          var forecastResult = results[1].status === 'fulfilled' ? results[1].value : null;
+          var meteoResult = results[2].status === 'fulfilled' ? results[2].value : null;
+
+          if (!weatherResult) {
+            throw new Error('Failed to get current weather from OpenWeatherMap');
+          }
+
+          var owmData = weatherResult.data;
+
+          // Normalize current weather
+          var normalizedCurrent = {
+            temp: owmData.main.temp,
+            feels_like: owmData.main.feels_like,
+            humidity: owmData.main.humidity,
+            wind_speed: owmData.wind.speed,
+            sunrise: owmData.sys.sunrise,
+            sunset: owmData.sys.sunset,
+            weather: owmData.weather
+          };
+
+          // Add Open-Meteo high/low for today
+          if (meteoResult && meteoResult.data && meteoResult.data.daily) {
+            normalizedCurrent.temp_max = meteoResult.data.daily.temperature_2m_max[0];
+            normalizedCurrent.temp_min = meteoResult.data.daily.temperature_2m_min[0];
+          }
+
+          // Normalize forecast
+          var normalizedDaily = [];
+          if (forecastResult && forecastResult.data && forecastResult.data.list) {
+            normalizedDaily = mergeForecast(forecastResult.data.list);
+          }
+
+          return {
+            current: normalizedCurrent,
+            daily: normalizedDaily
+          };
+        });
+      },
+
+      fetchAqi: function() {
+        var url = BASE_URL + '/air_pollution' + buildParams();
+
+        return axios.get(url).then(function(response) {
+          return response.data.list[0];
+        }).catch(function(err) {
+          console.warn('Failed to fetch AQI from OWM:', err);
+          return null;
+        });
+      },
+
+      fetchLocationName: function() {
+        var cacheKey = 'openweather_reverseGeo_' + config.lat + '_' + config.lon;
+        var cached = localStorage.getItem(cacheKey);
+
+        if (cached) {
+          try {
+            var items = JSON.parse(cached);
+            if (Array.isArray(items) && items.length > 0) {
+              var match = items[0];
+              var name = match.name;
+              if (match.local_names && match.local_names[config.lang]) {
+                name = match.local_names[config.lang];
+              }
+              if (name) {
+                console.debug('Using cached location name (OWM):', name);
+                return Promise.resolve(name);
+              }
+            }
+          } catch (e) {
+            console.warn('Error parsing cached OWM geo result:', e);
+          }
+        }
+
+        var url = 'https://api.openweathermap.org/geo/1.0/reverse' + buildParams();
+
+        return axios.get(url).then(function(response) {
+          var items = response.data;
+          if (!Array.isArray(items) || items.length === 0) {
+            return null;
+          }
+
+          var match = items[0];
+          var name = match.name;
+          if (match.local_names && match.local_names[config.lang]) {
+            name = match.local_names[config.lang];
+          }
+
+          if (name) {
+            localStorage.setItem(cacheKey, JSON.stringify(items));
+            console.log('Location name from OWM:', name);
+          }
+
+          return name;
+        }).catch(function(err) {
+          console.warn('Failed to fetch location name from OWM:', err);
+          return null;
+        });
+      }
+    };
+  }
+
+  /**
+   * Create an OpenWeatherMap 3.0 OneCall provider
+   */
+  function createOWMOneCallProvider(config) {
+    var BASE_URL = 'https://api.openweathermap.org/data/3.0';
+
+    function buildParams() {
+      var params = '?lat=' + config.lat + '&lon=' + config.lon + '&appid=' + config.apiKey + '&units=' + config.units;
+      if (config.lang) {
+        params += '&lang=' + config.lang;
+      }
+      return params;
+    }
+
+    return {
+      requiresApiKey: true,
+
+      fetchWeather: function() {
+        var url = BASE_URL + '/onecall' + buildParams() + '&exclude=minutely,hourly';
+
+        return axios.get(url).then(function(response) {
+          var data = response.data;
+
+          // OneCall data is already in the expected format, just add temp_max/min to current
+          if (data.daily && data.daily[0]) {
+            data.current.temp_max = data.daily[0].temp.max;
+            data.current.temp_min = data.daily[0].temp.min;
+          }
+
+          return {
+            current: data.current,
+            daily: data.daily
+          };
+        });
+      },
+
+      fetchAqi: function() {
+        // OneCall doesn't include AQI, use 2.5 endpoint
+        var url = 'https://api.openweathermap.org/data/2.5/air_pollution' + buildParams();
+
+        return axios.get(url).then(function(response) {
+          return response.data.list[0];
+        }).catch(function(err) {
+          console.warn('Failed to fetch AQI from OWM:', err);
+          return null;
+        });
+      },
+
+      fetchLocationName: function() {
+        // Same as Multi provider
+        var cacheKey = 'openweather_reverseGeo_' + config.lat + '_' + config.lon;
+        var cached = localStorage.getItem(cacheKey);
+
+        if (cached) {
+          try {
+            var items = JSON.parse(cached);
+            if (Array.isArray(items) && items.length > 0) {
+              var match = items[0];
+              var name = match.name;
+              if (match.local_names && match.local_names[config.lang]) {
+                name = match.local_names[config.lang];
+              }
+              if (name) {
+                console.debug('Using cached location name (OWM):', name);
+                return Promise.resolve(name);
+              }
+            }
+          } catch (e) {
+            console.warn('Error parsing cached OWM geo result:', e);
+          }
+        }
+
+        var url = 'https://api.openweathermap.org/geo/1.0/reverse' + buildParams();
+
+        return axios.get(url).then(function(response) {
+          var items = response.data;
+          if (!Array.isArray(items) || items.length === 0) {
+            return null;
+          }
+
+          var match = items[0];
+          var name = match.name;
+          if (match.local_names && match.local_names[config.lang]) {
+            name = match.local_names[config.lang];
+          }
+
+          if (name) {
+            localStorage.setItem(cacheKey, JSON.stringify(items));
+            console.log('Location name from OWM:', name);
+          }
+
+          return name;
+        }).catch(function(err) {
+          console.warn('Failed to fetch location name from OWM:', err);
+          return null;
+        });
+      }
+    };
+  }
+
+  /**
+   * Factory function to get the appropriate weather provider
+   */
+  function getWeatherProvider(apiPreference, config) {
+    switch (apiPreference) {
+      case 'openmeteo':
+        return createOpenMeteoProvider(config);
+      case '2-5multi':
+        return createOWMMultiProvider(config);
+      case '3-0onecall':
+        return createOWMOneCallProvider(config);
+      default:
+        console.warn('Unknown API preference: ' + apiPreference + ', falling back to Open-Meteo');
+        return createOpenMeteoProvider(config);
+    }
+  }
+
+  new Vue({
+    el: "#app",
+    data: function() {
+      return {
+        weather: { current: {}, daily: []},
+        airQuality: null,
+        locationName: null,
+        units: "imperial",
+        apiPreference: "openmeteo",
+        provider: null, // Weather provider instance
+        error: null,
+        showAqi: false,
+        appLayout: "default",
+        background: "default",
+        showLocationName: true, //only for certain layouts (eg. today-wide)
+
+        formatters: {
+          dayOfWeek: this.getDayOfWeekFormatter(),
+          shortTime: this.getTimeFormatter()
+        }
+      }
+    },
+    computed: {
+      appClasses: function(){
+        var classes = [];
+        if(this.background === 'default')
+          classes.push('default-background')
+        if(getIsSpaceEvenlySupported())
+          classes.push('space-evenly-supported')
+        return classes;
+      },
+      hasCurrent: function(){
+        return this.weather && this.weather.current && this.weather.current.temp != null //check for an arbitrary value within
+            && Array.isArray(this.weather.current.weather) && this.weather.current.weather.length > 0; //and we have the current weather array set
+      },
+      hasForecast: function(){ return this.weather && Array.isArray(this.weather.daily) && this.weather.daily.length > 0; },
+      aqiIndex: function(){ return this.airQuality && this.airQuality.main && this.airQuality.main.aqi; },
+      forecast: function(){
+        if(!this.hasForecast)
+          return [];
+        // All providers now return 7 days, show up to 6 (excluding today)
+        // For OWM 2.5 Multi, we get ~5 days, so slice accordingly
+        var maxDays = (this.apiPreference === '2-5multi') ? 5 : 7;
+        return this.weather.daily.slice(1, maxDays);
+      }, //remove the today's element
+      todaysForecast: function(){
+        if(this.hasForecast)
+        	return this.weather.daily[0];
+      },
+      temperature: function(){ return formatTemperature(this.hasCurrent && this.weather.current.temp); },
+      temperatureDigits: function(){
+        if(!this.hasCurrent)
+          return 0;
+        return stripDecimal(this.weather.current.temp).length
+      },
+      feelsLike: function(){ return formatTemperature(this.hasCurrent && this.weather.current.feels_like); },
+      weatherIcon: function(){ return this.hasCurrent && this.weather.current.weather[0].icon || null; },
+      weatherIconImageUrl: function(){ return this.weatherIcon && this.getIconUrl(this.weatherIcon); },
+      weatherSummary: function(){ return this.hasCurrent && this.weather.current.weather[0].description || null; },
+      highTemp: function(){ 
+        //the temp_max comes from a separate call to Open Meteo to workaround the limitations with the
+        // 2.5 Multi call from Open Weather to get the high/low temperature for the current day
+        if(this.hasCurrent && this.weather.current.temp_max != null){
+          // console.log("Using CURRENT weather for today's High/Low")
+          return formatTemperature(this.weather.current.temp_max);
+        }
+        // console.log("Falling back to FORECAST for today's High/Low")
+        return formatTemperature(this.hasForecast && this.weather.daily[0].temp.max); 
+      },
+      lowTemp: function(){ 
+        if(this.hasCurrent && this.weather.current.temp_min != null){
+          return formatTemperature(this.weather.current.temp_min);
+        }
+        return formatTemperature(this.hasForecast && this.weather.daily[0].temp.min); 
+      },
+      sunsetTime: function(){
+        if(!this.hasCurrent)
+          return;
+        if(!this.weather.current.sunset)
+          return
+        var dt = new Date(this.weather.current.sunset * 1000)	
+        return this.formatters.shortTime.format(dt);
+      },
+      sunriseTime: function(){
+        if(!this.hasCurrent)
+          return;
+        if(!this.weather.current.sunrise)
+          return
+        var dt = new Date(this.weather.current.sunrise * 1000)	
+        return this.formatters.shortTime.format(dt);
+      },
+      humidity: function(){ return stripDecimal(this.hasCurrent && this.weather.current.humidity); },
+      precipitation: function(){ 
+        if(!this.todaysForecast)
+          return
+        var precip = this.todaysForecast.pop;
+        if(precip == null)
+          return
+        return stripDecimal(precip * 100); 
+      },
+      windSpeed: function(){ 
+        return stripDecimal(this.hasCurrent && this.weather.current.wind_speed); 
+      },
+      windUoM: function(){
+        var uom = 'mph';
+        if(this.units === 'metric') uom = 'm/s'
+        return uom;
+      }
+      
+    },
+    methods: {
+      // Fetch weather data using the current provider
+      refreshWeather: function() {
+        var vm = this;
+
+        if (!this.provider) {
+          console.error('No weather provider configured');
+          return Promise.reject(new Error('No provider'));
+        }
+
+        var promises = [this.provider.fetchWeather()];
+
+        if (this.showAqi) {
+          promises.push(this.provider.fetchAqi());
+        }
+
+        if (this.showLocationName) {
+          promises.push(this.provider.fetchLocationName());
+        }
+
+        return Promise.allSettled(promises).then(function(results) {
+          // Weather data (required)
+          if (results[0].status === 'fulfilled' && results[0].value) {
+            vm.weather = results[0].value;
+            vm.error = null;
+          } else {
+            console.error('Failed to fetch weather:', results[0].reason);
+            vm.error = 'Failed to fetch weather data. Please check your settings.';
+          }
+
+          // AQI data (optional)
+          if (vm.showAqi && results[1] && results[1].status === 'fulfilled') {
+            vm.airQuality = results[1].value;
+          }
+
+          // Location name (optional)
+          var locationIndex = vm.showAqi ? 2 : 1;
+          if (vm.showLocationName && results[locationIndex] && results[locationIndex].status === 'fulfilled') {
+            vm.locationName = results[locationIndex].value;
+          }
+        }).catch(function(err) {
+          console.error('Error refreshing weather:', err);
+          vm.error = 'An error occurred while fetching weather data.';
+        });
+      },
+
+      //FORECAST helpers
+      getAqiClass: function(index){
+        let text = this.getAqiText(index);
+        return text.toLowerCase().replace(" ", "-");
+      },
+      getAqiText: function(index){ 
+        //if we weren't supplied an index, just use the aqiIndex
+        if(index == null)
+        	index = this.aqiIndex;
+        switch(index){
+          	case 1: return "Good";
+            case 2: return "Fair";
+            case 3: return "Moderate";
+            case 4: return "Poor";
+            case 5: return "Very Poor";
+          	default: return "Unknown"
+        }
+      },
+      getDoW: function(day){
+        var dt = new Date(day.dt * 1000);
+        if(dt != null)
+              return this.formatters.dayOfWeek.format(dt);
+      },
+      getIcon: function(day){ return day.weather[0].icon; },
+      getIconUrl: function(dayOrCode){ 
+        //if we're given a raw string, use it. Otherwise assume it's a day object and get the icon code from it
+        var code = (typeof dayOrCode === "string") ? dayOrCode : this.getIcon(dayOrCode)
+        // return this.getOWIconUrl(code); //uncomment this to use the original OWM icons
+        return this.getMeteoconUrl(code);
+      },
+      getHigh: function(day){ return formatTemperature(day.temp.max); },
+      getLow: function(day){ return formatTemperature(day.temp.min); },
+
+      getMeteoconUrl: function(code, iconStyle){
+        //See: https://basmilius.github.io/weather-icons/index-line.html
+        var name = METEO_CODE_TO_NAME[code] || code; //in case the raw icon name is passed in
+        if(!iconStyle) iconStyle = 'line'
+        return 'https://basmilius.github.io/weather-icons/production/' + iconStyle + '/all/' + name + '.svg'
+      },
+      getOWIconUrl: function(code){
+        return code && 'https://openweathermap.org/img/wn/' + code + '@2x.png'
+      },
+      getErikFlowerIconUrl: function(icon){
+        var version = '2.0.12';
+        return 'https://raw.githubusercontent.com/erikflowers/weather-icons/' + version + '/svg/wi-' + icon + '.svg';
+      },
+
+      getLanguage: function(lang){
+        //allow the language code to be passed in or fallback to the data model 
+        if(lang == null)
+          lang = this.lang
+        //if it's a valid language, use it
+        if(this.isValidLanguage(this.lang))
+          return this.lang;
+        else
+          return "en"; //default to english
+      },
+      isValidLanguage: function(lang){
+        if(isNullOrEmpty(lang))
+          return false;
+
+        return LANGUAGE_MAP[lang] != null;
+      },
+      getPhrase: function(phrase){
+        var lang = this.getLanguage()
+        return LANGUAGE_MAP[lang][phrase] || '';
+      },
+      getDayOfWeekFormatter: function(){
+        var lang = this.getLanguage();
+        if(typeof lang === 'string') lang.replace('_', '-') //BCP 47 uses `-` whereas OWM uses `_`
+        return new Intl.DateTimeFormat(lang, { weekday: "short" });
+      },
+      getTimeFormatter: function(){
+        var lang = this.getLanguage();
+        if(typeof lang === 'string') lang.replace('_', '-') //BCP 47 uses `-` whereas OWM uses `_`
+        try {
+          return new Intl.DateTimeFormat('en-US', { timeStyle: 'short' });
+        } catch (e) {
+          // Fallback for browsers that don't support `timeStyle`
+          return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
+        }
+      },
+
+
+      setBackground: function(){
+        var cssSnippet = '';
+        if(this.background === 'default')
+        	cssSnippet = 'html { background: linear-gradient(52deg, rgba(12,5,147,1) 0%, rgba(16,16,172,1) 30%, rgba(113,0,255,1) 100%) }';
+        
+      	// Check if a style tag with a specific ID already exists
+        var styleTag = document.getElementById('custom-style');
+      
+        // If it doesn't exist, create a new style tag
+        if (!styleTag) {
+          styleTag = document.createElement('style');
+          styleTag.id = 'custom-style';
+          document.head.appendChild(styleTag);
+        }
+      
+        // Set the CSS content of the style tag to the provided CSS snippet
+        styleTag.innerHTML = cssSnippet;
+      },
+
+
+      initialize: function(){
+        // Fetch weather once, then schedule periodic refresh
+        var vm = this;
+        this.refreshWeather().then(function() {
+          setInterval(function() {
+            vm.refreshWeather();
+          }, REFRESH_INTERVAL);
+        });
+      }
+    },
+    watch: {
+      //when the list of forecast items changes
+      forecast: function(items, oldItems){
+        //as long as it's a valid array of items
+        if(Array.isArray(items) && items.length > 0){
+          //update our CSS variable so we can calculate a font-size to better fit the number of items
+          this.$refs.forecastTable.style.setProperty("--number-of-items", items.length); //OWM 2.5 Multi = 4 items, OneCall = 6 items
+        }
+      }
+    },
+    mounted: function(){
+      var vm = this;
+      stio.ready(function(data){
+        if(!isNullOrEmpty(data.settings.apiKey)){
+          API_KEY = data.settings.apiKey;
+        }
+        if(!isNullOrEmpty(data.settings.layout)){
+          vm.appLayout = data.settings.layout;
+        }
+        // Only today-wide layout displays location name, so only fetch for that layout
+        if (vm.appLayout === 'today-wide') {
+          if(!isNullOrEmpty(data.settings.showLocationName)){
+            vm.showLocationName = data.settings.showLocationName;
+          }
+        } else {
+          vm.showLocationName = false;
+        }
+        if(!isNullOrEmpty(data.settings.useDefaultBackground)){
+          var value;
+          var useDefault = data.settings.useDefaultBackground;
+          if(useDefault)
+            value = "default"
+
+          vm.background = value;
+          // vm.setBackground(); //let it happen reactively
+        }
+        if(!isNullOrEmpty(data.settings.location)){
+          var re = /^(-?\d+(\.\d+)?),\s*(-?\d+(\.\d+)?)$/
+          var match = data.settings.location.match(re);
+          //[m, lat, latp, lon, lonp]
+          LAT = match[1]; //lat
+          LON = match[3]; //lon
+        }
+        if(!isNullOrEmpty(data.settings.units)){
+          vm.units = data.settings.units;
+        }
+        if(!isNullOrEmpty(data.settings.lang)){
+          vm.lang = data.settings.lang
+          vm.formatters.dayOfWeek = vm.getDayOfWeekFormatter();
+          vm.formatters.shortTime = vm.getTimeFormatter();
+        }
+        if(!isNullOrEmpty(data.settings.apiPreference)){
+          var apiPref = data.settings.apiPreference;
+
+          // Handle deprecated 2-5onecall - auto-migrate to 2-5multi
+          if (apiPref === '2-5onecall') {
+            console.log('OWM 2.5 OneCall API is deprecated. Automatically using 2.5 Multi-Endpoint instead.');
+            apiPref = '2-5multi';
+          }
+
+          vm.apiPreference = apiPref;
+        }
+        if(!isNullOrEmpty(data.settings.showAqi)){
+          vm.showAqi = !!data.settings.showAqi;
+        }
+        if(data.settings.isCustomRefreshInterval === true && !isNullOrEmpty(data.settings.refreshInterval)){
+          try{
+            var interval = data.settings.refreshInterval * 60 * 1000;
+            //must be at least a minute
+            if(interval >= (60 * 1000)){
+              console.log('Using CUSTOM refresh interval', data.settings.refreshInterval)
+              REFRESH_INTERVAL = interval;
+              if(data.settings.refreshInterval < 10)
+                stio.showToast("Weather Custom Tile: a refresh interval faster than 10 minutes is not recommended", "red")
+            }
+            else{
+              console.error('Invalid refresh interval', data.settings.refreshInterval)
+            }
+          }
+          catch(error){
+            console.error('Invalid refresh interval. Using default.')
+          }
+        }
+
+        // Create the weather provider with current configuration
+        var providerConfig = {
+          lat: LAT,
+          lon: LON,
+          units: vm.units,
+          lang: vm.lang,
+          apiKey: API_KEY
+        };
+        vm.provider = getWeatherProvider(vm.apiPreference, providerConfig);
+
+        // Check if provider requires API key but none provided
+        if (vm.provider.requiresApiKey && isNullOrEmpty(API_KEY)) {
+          vm.error = 'OpenWeatherMap API key is required. Please configure it in tile settings.';
+          return;
+        }
+
+        vm.initialize()
+      });
+    }
+  });
+
+  /* Other helpers. Will get hoisted for use above */
+  function getIsSpaceEvenlySupported(){
+    var testElement = document.createElement('div');
+    testElement.style.display = 'flex';
+    testElement.style.justifyContent = 'space-evenly';
+    testElement.style.visibility = 'hidden';
+    testElement.style.position = 'absolute';
+    testElement.style.width = '0';
+    testElement.style.height = '0';
+
+    // Append to body temporarily for testing
+    document.body.appendChild(testElement);
+    
+    // Check computed style
+    var isSupported = window.getComputedStyle(testElement).justifyContent === 'space-evenly';
+    
+    // Remove the test element
+    document.body.removeChild(testElement);
+
+    var isModernVersion = checkBrowserVersion()
+    return isSupported && isModernVersion;
+  }
+
+  function checkBrowserVersion() {
+    var userAgent = navigator.userAgent;
+    
+    // Check Chrome
+    var chromeMatch = userAgent.match(/Chrom(e|ium)\/([0-9]+)\./);
+    if (chromeMatch) {
+      var chromeVersion = parseInt(chromeMatch[2], 10);
+      if (chromeVersion >= 60) {
+        return true;
+      }
+    }
+  
+    // Check Safari
+    var safariMatch = userAgent.match(/Version\/([0-9]+)\.([0-9]+)(?:\.([0-9]+)?) Safari/);
+    if (safariMatch) {
+      var safariVersion = parseInt(safariMatch[1], 10);
+      if (safariVersion >= 11) {
+        return true;
+      }
+    }
+  
+    return false;
+  }
+
+</script>

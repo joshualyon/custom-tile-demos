@@ -1,6 +1,6 @@
 <script>
   /*
-    VERSION: 2024-12-19
+    VERSION: 2025-12-19
 
     Multi-provider weather tile supporting:
     - Open-Meteo (no API key required - default)
@@ -62,7 +62,8 @@
         {"label": "Today (Wide)", "value": "today-wide"},
         {"label": "Today (Mini)", "value": "today-mini"},
         {"label": "Forecast", "value": "forecast-only"},
-        {"label": "Forecast (Horizontal)", "value": "forecast-horizontal"}
+        {"label": "Forecast (Horizontal)", "value": "forecast-horizontal"},
+        {"label": "Weekly Trend", "value": "weekly-trend"}
       ],
       "type": "ENUM",
       "label": "Layout",
@@ -75,6 +76,17 @@
       "name": "showLocationName",
       "label": "Show Location Name",
       "showIf": ["layout", "==", "today-wide"]
+    },
+    {
+      "type": "ENUM",
+      "name": "trendChartStyle",
+      "label": "Chart Style",
+      "default": "average",
+      "values": [
+        {"label": "Average Temperature", "value": "average"},
+        {"label": "High/Low Areas", "value": "highlow"}
+      ],
+      "showIf": ["layout", "==", "weekly-trend"]
     },
     {
       "type": "BOOLEAN",
@@ -110,6 +122,7 @@
 <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=Promise,Promise.allSettled,Object.assign,Intl"></script>
 <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/axios@0.27.2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
 
 
@@ -158,7 +171,7 @@
       </div>
     </div>
   </div>
-  <!-- FORECAST DATA --> 
+  <!-- FORECAST DATA -->
   <table class="forecast" ref="forecastTable">
     <tbody><tr class="day" v-for="day in forecast">
       <td class="day-of-week">{{getDoW(day)}}</td>
@@ -167,6 +180,21 @@
       <td class="low" align="right">{{getLow(day)}}</td>
     </tr>
   </tbody></table>
+  <!-- WEEKLY TREND LAYOUT -->
+  <div class="weekly-trend" v-if="appLayout === 'weekly-trend'">
+    <div class="trend-details">
+      <div class="trend-day" v-for="day in trendForecast">
+        <div class="trend-dow">{{getDoW(day)}}</div>
+        <div class="trend-icon"><img :src="getIconUrl(day)"></div>
+        <div class="trend-high">{{getHigh(day)}}</div>
+        <div class="trend-low">{{getLow(day)}}</div>
+        <div class="trend-precip" v-if="getPop(day) > 0">{{getPop(day)}}%</div>
+      </div>
+    </div>
+    <div class="trend-chart-container">
+      <canvas ref="trendChart"></canvas>
+    </div>
+  </div>
   <div class="location-name" v-show="showLocationName && locationName" v-text="locationName"></div>
   <div class="error" v-if="error">
     <span v-text="error"></span>
@@ -558,9 +586,114 @@
     width: 0px;
     display: block;
   }
-  
 
-  
+
+  /***************************
+   *
+   * Template: weekly-trend
+   *
+   *****/
+  [data-layout="weekly-trend"] {
+    display: flex;
+    flex-direction: column;
+  }
+  [data-layout="weekly-trend"] .today { display: none; }
+  [data-layout="weekly-trend"] .forecast { display: none; }
+  [data-layout="weekly-trend"] .location-name { display: none; }
+
+  .weekly-trend {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    flex: 1;
+    min-height: 0; /* Allow shrinking in flex container */
+    overflow: hidden;
+  }
+
+  .trend-chart-container {
+    flex: 1;
+    min-height: 0; /* Important for flex child with canvas */
+    position: relative;
+    padding: var(--1u) 0 0 0;
+    overflow: hidden; /* Hide the off-screen padding points */
+  }
+
+  .trend-chart-container canvas {
+    /* Extend canvas beyond container so fake padding points are off-screen.
+       --trend-items is set from JS based on number of forecast days.
+       Formula: width divisor = N+2, margin divisor = 2*(N+2) where N = real points */
+    --trend-items: 7; /* default, overridden by JS */
+    width: calc(100% + 100% / (var(--trend-items) + 2)) !important;
+    height: 100% !important;
+    margin-left: calc(-100% / (2 * (var(--trend-items) + 2)));
+  }
+
+  .trend-details {
+    display: flex;
+    justify-content: space-around;
+    padding: calc(6 * var(--unit)) var(--2u);
+    flex-shrink: 0;
+  }
+
+  .trend-day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 0; /* Allow shrinking */
+    position: relative; /* For absolute positioning of precip */
+  }
+
+  .trend-dow {
+    font-size: calc(var(--font-size) * 0.9);
+    font-weight: 500;
+    text-transform: uppercase;
+    opacity: 0.9;
+  }
+
+  .trend-icon {
+    height: calc(var(--font-size) * 2);
+    width: calc(var(--font-size) * 2);
+  }
+
+  .trend-icon img {
+    height: 100%;
+    width: 100%;
+    object-fit: contain;
+  }
+
+  .trend-high {
+    font-size: calc(var(--font-size) * 1.1);
+    font-weight: 600;
+  }
+
+  .trend-low {
+    font-size: calc(var(--font-size) * 0.9);
+    opacity: 0.7;
+  }
+
+  .trend-precip {
+    position: absolute;
+    bottom: calc(-1 * var(--font-size) * 1.3);
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: calc(var(--font-size) * 0.65);
+    color: white;
+    background: rgba(100, 180, 255, 0.4);
+    padding: 0.1em 0.4em;
+    border-radius: 0.3em;
+    white-space: nowrap;
+  }
+
+  /* Responsive adjustments for weekly-trend */
+  @media (max-aspect-ratio: 2/1) {
+    /* For less wide tiles, reduce icon and font sizes */
+    [data-layout="weekly-trend"] {
+      --font-size: 4vh;
+    }
+  }
+
+
   /* END: TEMPLATES */
 
   .error {
@@ -1623,6 +1756,8 @@
         appLayout: "default",
         background: "default",
         showLocationName: true, //only for certain layouts (eg. today-wide)
+        trendChart: null, // Chart.js instance for weekly-trend layout
+        trendChartStyle: 'average', // 'average' or 'highlow'
 
         formatters: {
           dayOfWeek: this.getDayOfWeekFormatter(),
@@ -1653,6 +1788,14 @@
         var maxDays = (this.apiPreference === '2-5multi') ? 5 : 7;
         return this.weather.daily.slice(1, maxDays);
       }, //remove the today's element
+      trendForecast: function(){
+        // For weekly trend, include today + next 6 days (7 total)
+        // For OWM 2.5 Multi, we get fewer days
+        if(!this.hasForecast)
+          return [];
+        var maxDays = (this.apiPreference === '2-5multi') ? 5 : 7;
+        return this.weather.daily.slice(0, maxDays);
+      },
       todaysForecast: function(){
         if(this.hasForecast)
         	return this.weather.daily[0];
@@ -1796,6 +1939,216 @@
       },
       getHigh: function(day){ return formatTemperature(day.temp.max); },
       getLow: function(day){ return formatTemperature(day.temp.min); },
+      getPop: function(day){
+        // Return precipitation probability as a percentage (0-100)
+        if (!day || day.pop == null) return 0;
+        return Math.round(day.pop * 100);
+      },
+
+      // Chart.js methods for weekly-trend layout
+      initTrendChart: function() {
+        var vm = this;
+        if (this.appLayout !== 'weekly-trend') return;
+        if (!this.$refs.trendChart) return;
+
+        // Destroy existing chart if it exists
+        if (this.trendChart) {
+          this.trendChart.destroy();
+          this.trendChart = null;
+        }
+
+        var ctx = this.$refs.trendChart.getContext('2d');
+        var forecast = this.trendForecast;
+
+        if (!forecast || forecast.length === 0) return;
+
+        // Set CSS variable for dynamic canvas sizing based on number of data points
+        this.$refs.trendChart.style.setProperty('--trend-items', forecast.length);
+
+        // Prepare data arrays with padding points for full-bleed effect
+        // Add invisible points at start/end that extend the line to canvas edges
+        var labels = forecast.map(function(day) {
+          return vm.getDoW(day);
+        });
+        var minTemps = forecast.map(function(day) {
+          return day.temp.min;
+        });
+        var maxTemps = forecast.map(function(day) {
+          return day.temp.max;
+        });
+        var avgTemps = forecast.map(function(day) {
+          return (day.temp.min + day.temp.max) / 2;
+        });
+
+        // Add padding points at start and end (same values as first/last real points)
+        // These will have pointRadius: 0 so they're invisible but extend the line
+        labels = [''].concat(labels).concat(['']);
+        minTemps = [minTemps[0]].concat(minTemps).concat([minTemps[minTemps.length - 1]]);
+        maxTemps = [maxTemps[0]].concat(maxTemps).concat([maxTemps[maxTemps.length - 1]]);
+        avgTemps = [avgTemps[0]].concat(avgTemps).concat([avgTemps[avgTemps.length - 1]]);
+
+        // Create pointRadius arrays: 0 for padding points, normal for real data
+        var numPoints = labels.length;
+        function createPointRadiusArray(normalRadius) {
+          var arr = [];
+          for (var i = 0; i < numPoints; i++) {
+            arr.push(i === 0 || i === numPoints - 1 ? 0 : normalRadius);
+          }
+          return arr;
+        }
+
+        // Build datasets based on chart style
+        var datasets;
+        if (this.trendChartStyle === 'highlow') {
+          // High/Low Areas style: two overlapping gradient areas
+          // Low fills to origin, High fills to Low ('-1')
+          datasets = [
+            {
+              label: 'Low',
+              data: minTemps,
+              borderColor: 'rgba(100, 150, 255, 0.8)',
+              backgroundColor: function(context) {
+                var chart = context.chart;
+                var ctx = chart.ctx;
+                var chartArea = chart.chartArea;
+                if (!chartArea) return 'rgba(100, 150, 255, 0.3)';
+                var gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                gradient.addColorStop(0, 'rgba(100, 150, 255, 0.4)');
+                gradient.addColorStop(1, 'rgba(100, 150, 255, 0.05)');
+                return gradient;
+              },
+              borderWidth: 2,
+              pointRadius: createPointRadiusArray(3),
+              pointBackgroundColor: 'rgba(100, 150, 255, 0.9)',
+              pointBorderColor: 'transparent',
+              fill: 'origin',
+              tension: 0.4,
+              clip: false
+            },
+            {
+              label: 'High',
+              data: maxTemps,
+              borderColor: 'rgba(255, 180, 100, 0.8)',
+              backgroundColor: function(context) {
+                var chart = context.chart;
+                var ctx = chart.ctx;
+                var chartArea = chart.chartArea;
+                if (!chartArea) return 'rgba(255, 180, 100, 0.3)';
+                var gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                gradient.addColorStop(0, 'rgba(255, 180, 100, 0.5)');
+                gradient.addColorStop(1, 'rgba(255, 180, 100, 0.05)');
+                return gradient;
+              },
+              borderWidth: 2,
+              pointRadius: createPointRadiusArray(3),
+              pointBackgroundColor: 'rgba(255, 180, 100, 0.9)',
+              pointBorderColor: 'transparent',
+              fill: '-1',
+              tension: 0.4,
+              clip: false
+            }
+          ];
+        } else {
+          // Average style: single clean line
+          datasets = [
+            {
+              label: 'Average',
+              data: avgTemps,
+              borderColor: 'rgba(255, 255, 255, 0.9)',
+              backgroundColor: 'transparent',
+              borderWidth: 3,
+              pointRadius: createPointRadiusArray(4),
+              pointBackgroundColor: 'rgba(255, 255, 255, 0.9)',
+              pointBorderColor: 'transparent',
+              fill: false,
+              tension: 0.4
+            }
+          ];
+        }
+
+        this.trendChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: datasets
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: false
+              },
+              tooltip: {
+                enabled: false
+              }
+            },
+            scales: {
+              x: {
+                display: false,
+                offset: false,
+                grid: {
+                  display: false
+                }
+              },
+              y: {
+                display: false,
+                grid: {
+                  display: false
+                }
+              }
+            },
+            elements: {
+              line: {
+                borderJoinStyle: 'round'
+              }
+            },
+            layout: {
+              padding: {
+                left: 0,
+                right: 0,
+                top: 8,
+                bottom: 0
+              }
+            }
+          }
+        });
+      },
+
+      updateTrendChart: function() {
+        var vm = this;
+        if (!this.trendChart || this.appLayout !== 'weekly-trend') return;
+
+        var forecast = this.trendForecast;
+        if (!forecast || forecast.length === 0) return;
+
+        // Update labels with padding points
+        var labels = forecast.map(function(day) {
+          return vm.getDoW(day);
+        });
+        labels = [''].concat(labels).concat(['']);
+        this.trendChart.data.labels = labels;
+
+        // Update data based on chart style (with padding points)
+        if (this.trendChartStyle === 'highlow') {
+          // High/Low style: 2 datasets (low, high)
+          var minTemps = forecast.map(function(day) { return day.temp.min; });
+          var maxTemps = forecast.map(function(day) { return day.temp.max; });
+          minTemps = [minTemps[0]].concat(minTemps).concat([minTemps[minTemps.length - 1]]);
+          maxTemps = [maxTemps[0]].concat(maxTemps).concat([maxTemps[maxTemps.length - 1]]);
+          this.trendChart.data.datasets[0].data = minTemps;
+          this.trendChart.data.datasets[1].data = maxTemps;
+        } else {
+          // Average style: 1 dataset
+          var avgTemps = forecast.map(function(day) {
+            return (day.temp.min + day.temp.max) / 2;
+          });
+          avgTemps = [avgTemps[0]].concat(avgTemps).concat([avgTemps[avgTemps.length - 1]]);
+          this.trendChart.data.datasets[0].data = avgTemps;
+        }
+
+        this.trendChart.update();
+      },
 
       getMeteoconUrl: function(code, iconStyle){
         //See: https://basmilius.github.io/weather-icons/index-line.html
@@ -1881,10 +2234,46 @@
     watch: {
       //when the list of forecast items changes
       forecast: function(items, oldItems){
-        //as long as it's a valid array of items
-        if(Array.isArray(items) && items.length > 0){
+        //as long as it's a valid array of items and the forecast table exists
+        if(Array.isArray(items) && items.length > 0 && this.$refs.forecastTable){
           //update our CSS variable so we can calculate a font-size to better fit the number of items
           this.$refs.forecastTable.style.setProperty("--number-of-items", items.length); //OWM 2.5 Multi = 4 items, OneCall = 6 items
+        }
+      },
+      // Initialize or update the trend chart when forecast data changes
+      trendForecast: function(items, oldItems) {
+        var vm = this;
+        if (this.appLayout === 'weekly-trend' && Array.isArray(items) && items.length > 0) {
+          // Use nextTick to ensure DOM is ready
+          this.$nextTick(function() {
+            if (vm.trendChart) {
+              vm.updateTrendChart();
+            } else {
+              vm.initTrendChart();
+            }
+          });
+        }
+      },
+      // Handle layout changes - initialize chart if switching to weekly-trend
+      appLayout: function(newLayout, oldLayout) {
+        var vm = this;
+        if (newLayout === 'weekly-trend') {
+          this.$nextTick(function() {
+            vm.initTrendChart();
+          });
+        } else if (oldLayout === 'weekly-trend' && vm.trendChart) {
+          // Clean up chart when leaving weekly-trend layout
+          vm.trendChart.destroy();
+          vm.trendChart = null;
+        }
+      },
+      // Reinitialize chart when chart style changes
+      trendChartStyle: function(newStyle, oldStyle) {
+        var vm = this;
+        if (this.appLayout === 'weekly-trend' && this.trendChart) {
+          this.$nextTick(function() {
+            vm.initTrendChart();
+          });
         }
       }
     },
@@ -1904,6 +2293,12 @@
           }
         } else {
           vm.showLocationName = false;
+        }
+        // Handle weekly-trend specific settings
+        if (vm.appLayout === 'weekly-trend') {
+          if(!isNullOrEmpty(data.settings.trendChartStyle)){
+            vm.trendChartStyle = data.settings.trendChartStyle;
+          }
         }
         if(!isNullOrEmpty(data.settings.useDefaultBackground)){
           var value;

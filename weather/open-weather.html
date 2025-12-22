@@ -1,6 +1,6 @@
 <script>
   /*
-    VERSION: 2025-12-19
+    VERSION: 2025-12-22
 
     Multi-provider weather tile supporting:
     - Open-Meteo (no API key required - default)
@@ -81,10 +81,10 @@
       "type": "ENUM",
       "name": "trendChartStyle",
       "label": "Chart Style",
-      "default": "average",
+      "default": "highlow",
       "values": [
         {"label": "Average Temperature", "value": "average"},
-        {"label": "High/Low Areas", "value": "highlow"}
+        {"label": "High/Low Temperature", "value": "highlow"}
       ],
       "showIf": ["layout", "==", "weekly-trend"]
     },
@@ -98,7 +98,13 @@
       "name": "showAqi",
       "type": "BOOLEAN",
       "label": "Show AQI (Air Quality)",
-      "default": false
+      "default": false,
+      "showIf": [
+        ["layout", "!=", "weekly-trend"], 
+        ["layout", "!=", "today-mini"], 
+        ["layout", "!=", "forecast-only"], 
+        ["layout", "!=", "forecast-horizontal"]
+      ]
     },
     {
       "default": false,
@@ -2310,11 +2316,14 @@
           // vm.setBackground(); //let it happen reactively
         }
         if(!isNullOrEmpty(data.settings.location)){
-          var re = /^(-?\d+(\.\d+)?),\s*(-?\d+(\.\d+)?)$/
-          var match = data.settings.location.match(re);
+          var input = data.settings.location.trim();
+          var re = /^(-?\d+(\.\d+)?)[,\s]+(-?\d+(\.\d+)?)$/
+          var match = input.match(re);
           //[m, lat, latp, lon, lonp]
-          LAT = match[1]; //lat
-          LON = match[3]; //lon
+          if (match) {
+            LAT = match[1]; //lat
+            LON = match[3]; //lon
+          }
         }
         if(!isNullOrEmpty(data.settings.units)){
           vm.units = data.settings.units;

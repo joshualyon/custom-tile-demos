@@ -1,6 +1,6 @@
 <script>
   /*
-    VERSION: 2025-12-22
+    VERSION: 2026-02-06
 
     Multi-provider weather tile supporting:
     - Open-Meteo (no API key required - default)
@@ -17,6 +17,32 @@
   var API_KEY = ''; //this is set in tile settings now
   var LAT=33,LON=-96; //this is set in tile settings now
   var REFRESH_INTERVAL = 3 * 60 * 60 * 1000; //3 hours in milliseconds, set in tile settings now
+
+  // Debug error handler for older browsers without dev tools access
+  (function() {
+    window.onerror = function(message, source, lineno, colno, error) {
+      var errorMsg = message + ' (Line: ' + lineno + ')';
+      console.error('Global error:', errorMsg);
+      if (typeof stio !== 'undefined' && stio.showToast) {
+        stio.showToast(errorMsg, 'red');
+      } else {
+        alert('Error: ' + errorMsg);
+      }
+      return false;
+    };
+
+    window.onunhandledrejection = function(event) {
+      var reason = event.reason;
+      var errorMsg = 'Promise: ' + (reason && reason.message ? reason.message : String(reason));
+      console.error('Unhandled rejection:', errorMsg);
+      if (typeof stio !== 'undefined' && stio.showToast) {
+        stio.showToast(errorMsg, 'red');
+      } else {
+        alert('Error: ' + errorMsg);
+      }
+    };
+  })();
+
 </script>
 <!-- Do not edit below -->
 <script type="application/json" id="tile-settings">
@@ -128,8 +154,7 @@
 <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=Promise,Promise.allSettled,Object.assign,Intl"></script>
 <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/axios@0.27.2"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script src="https://cdn.sharptools.io/js/custom-tiles/0.2.2/stio.js"></script>
 
 
 <div id="app" :data-layout="appLayout" :data-temperature-digits="temperatureDigits" :class="appClasses">
@@ -198,7 +223,11 @@
       </div>
     </div>
     <div class="trend-chart-container">
-      <canvas ref="trendChart"></canvas>
+      <canvas ref="trendChart" v-show="chartJsStatus === 'loaded'"></canvas>
+      <div class="chart-loading" v-if="chartJsStatus === 'loading'">Loading chart...</div>
+      <div class="chart-unsupported" v-if="chartJsStatus === 'unsupported'">
+        Chart unavailable on this browser
+      </div>
     </div>
   </div>
   <div class="location-name" v-show="showLocationName && locationName" v-text="locationName"></div>
@@ -634,6 +663,17 @@
     margin-left: calc(-100% / (2 * (var(--trend-items) + 2)));
   }
 
+  .chart-loading,
+  .chart-unsupported {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: calc(3 * var(--unit));
+    text-align: center;
+  }
+
   .trend-details {
     display: flex;
     justify-content: space-around;
@@ -733,6 +773,58 @@
   }
 
   function isNullOrEmpty(v){ return v == null || v === "" };
+
+  // Chart.js lazy loading for ES2022+ browsers only
+  // Chart.js 4.x uses ES2022 class fields which aren't supported in older browsers (Safari < 14.1)
+  var chartJsLoader = {
+    status: 'not-loaded', // 'not-loaded', 'loading', 'loaded', 'unsupported'
+    promise: null,
+
+    // Detect ES2022 class field support by attempting to evaluate the syntax
+    supportsES2022ClassFields: function() {
+      try {
+        // This syntax requires ES2022 class field support
+        new Function('return class { field = 1 }')();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+
+    // Load Chart.js dynamically, returns a Promise
+    load: function() {
+      var self = this;
+
+      // Return existing promise if already loading/loaded
+      if (this.promise) {
+        return this.promise;
+      }
+
+      // Check browser support first
+      if (!this.supportsES2022ClassFields()) {
+        this.status = 'unsupported';
+        this.promise = Promise.reject(new Error('Browser does not support ES2022 class fields required by Chart.js 4'));
+        return this.promise;
+      }
+
+      this.status = 'loading';
+      this.promise = new Promise(function(resolve, reject) {
+        var script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+        script.onload = function() {
+          self.status = 'loaded';
+          resolve(window.Chart);
+        };
+        script.onerror = function() {
+          self.status = 'unsupported';
+          reject(new Error('Failed to load Chart.js'));
+        };
+        document.head.appendChild(script);
+      });
+
+      return this.promise;
+    }
+  };
 
   var LANGUAGE_MAP = {"af":{"feels_like":"Hitte-indeks"},"al":{"feels_like":"ndjehet si"},"ar":{"feels_like":"مؤشر الحرارة"},"az":{"feels_like":"istilik indeksi"},"bg":{"feels_like":"топлинен индекс"},"ca":{"feels_like":"índex de calor"},"cz":{"feels_like":"zdánlivá teplota"},"da":{"feels_like":"Føles som"},"de":{"feels_like":"Hitzeindex"},"el":{"feels_like":"δείκτης θερμότητας"},"en":{"feels_like":"Feels Like"},"eu":{"feels_like":"bero-indizea"},"fa":{"feels_like":"شاخص گرما"},"fi":{"feels_like":"lämpöindeksi"},"fr":{"feels_like":"indice de chaleur"},"gl":{"feels_like":"índice de calor"},"he":{"feels_like":"מד חום"},"hi":{"feels_like":"ताप सूचकांक"},"hr":{"feels_like":"indeks topline"},"hu":{"feels_like":"hő index"},"id":{"feels_like":"Indeks panas"},"it":{"feels_like":"indice di calore"},"ja":{"feels_like":"暑さ指数"},"kr":{"feels_like":"열 지수"},"la":{"feels_like":"siltuma indekss"},"lt":{"feels_like":"šilumos indeksas"},"mk":{"feels_like":"индекс на топлина"},"no":{"feels_like":"varmeindeks"},"nl":{"feels_like":"warmte-index"},"pl":{"feels_like":"indeks ciepła"},"pt":{"feels_like":"índice de calor"},"pt_br":{"feels_like":"índice de calor"},"ro":{"feels_like":"Index de caldura"},"ru":{"feels_like":"тепловой индекс"},"sv":{"feels_like":"värmeindex"},"se":{"feels_like":"värmeindex"},"sk":{"feels_like":"tepelný index"},"sl":{"feels_like":"toplotni indeks"},"sp":{"feels_like":"índice de calor"},"es":{"feels_like":"índice de calor"},"sr":{"feels_like":"топлотни индекс"},"th":{"feels_like":"ดัชนีความร้อน"},"tr":{"feels_like":"ısı indeksi"},"ua":{"feels_like":"індекс тепла"},"uk":{"feels_like":"індекс тепла"},"vi":{"feels_like":"chỉ số nhiệt"},"zh_cn":{"feels_like":"热度指数"},"zh_tw":{"feels_like":"熱度指數"},"zu":{"feels_like":"uzizwa"}};
   var METEO_CODE_TO_NAME = {
@@ -1764,6 +1856,7 @@
         showLocationName: true, //only for certain layouts (eg. today-wide)
         trendChart: null, // Chart.js instance for weekly-trend layout
         trendChartStyle: 'average', // 'average' or 'highlow'
+        chartJsStatus: 'not-loaded', // 'not-loaded', 'loading', 'loaded', 'unsupported'
 
         formatters: {
           dayOfWeek: this.getDayOfWeekFormatter(),
@@ -1915,7 +2008,7 @@
 
       //FORECAST helpers
       getAqiClass: function(index){
-        let text = this.getAqiText(index);
+        var text = this.getAqiText(index);
         return text.toLowerCase().replace(" ", "-");
       },
       getAqiText: function(index){ 
@@ -1953,6 +2046,37 @@
 
       // Chart.js methods for weekly-trend layout
       initTrendChart: function() {
+        var vm = this;
+        if (this.appLayout !== 'weekly-trend') return;
+        if (!this.$refs.trendChart) return;
+
+        // If Chart.js is already loaded, create the chart directly
+        if (chartJsLoader.status === 'loaded' && window.Chart) {
+          this._createTrendChart();
+          return;
+        }
+
+        // If unsupported, don't try to load
+        if (chartJsLoader.status === 'unsupported') {
+          this.chartJsStatus = 'unsupported';
+          return;
+        }
+
+        // Lazy load Chart.js
+        this.chartJsStatus = 'loading';
+        chartJsLoader.load()
+          .then(function() {
+            vm.chartJsStatus = 'loaded';
+            vm._createTrendChart();
+          })
+          .catch(function(err) {
+            vm.chartJsStatus = 'unsupported';
+            console.warn('Chart.js not available:', err.message);
+          });
+      },
+
+      // Internal method to create the chart (called after Chart.js is loaded)
+      _createTrendChart: function() {
         var vm = this;
         if (this.appLayout !== 'weekly-trend') return;
         if (!this.$refs.trendChart) return;

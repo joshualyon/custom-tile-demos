@@ -1,0 +1,963 @@
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  background: linear-gradient(135deg, #020617 0%, #0f172a 50%, #172554 100%);
+  color: #f1f5f9;
+}
+#app {
+  width: 100%; height: 100%;
+  overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column;
+}
+
+/* Loading */
+.loading-view {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: #94a3b8; gap: 16px;
+}
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid #1e293b;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+.hidden { display: none !important; }
+
+/* Error */
+.error-bar {
+  background: rgba(127,29,29,0.3); border: 1px solid #991b1b;
+  border-radius: 12px; padding: 12px 16px; margin: 8px;
+  display: flex; align-items: center; gap: 10px;
+  color: #fecaca; font-size: 14px;
+}
+
+/* Content */
+#content {
+  display: flex; flex-direction: column;
+  padding: 12px; gap: 12px;
+}
+
+/* Location Header */
+.location-header {
+  display: flex; justify-content: space-between;
+  align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.location-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 1.25em; font-weight: 600;
+}
+.location-row svg { color: #3b82f6; flex-shrink: 0; }
+
+/* Source Toggle */
+.source-toggle {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: rgba(15,23,42,0.5); border: 1px solid #1e293b;
+  border-radius: 8px; padding: 3px;
+}
+.source-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 6px;
+  font-size: 11px; font-weight: 600;
+  border: none; cursor: pointer; transition: all 0.2s;
+  color: #94a3b8; background: transparent;
+  font-family: inherit;
+}
+.source-btn:hover { color: #e2e8f0; }
+.source-btn.active-noaa { background: #2563eb; color: #fff; box-shadow: 0 2px 8px rgba(37,99,235,0.3); }
+.source-btn.active-om { background: #059669; color: #fff; box-shadow: 0 2px 8px rgba(5,150,105,0.3); }
+.source-label {
+  padding: 6px 12px; font-size: 11px; font-weight: 500;
+  color: #34d399; display: inline-flex; align-items: center; gap: 8px;
+}
+
+/* Tide Panel */
+.tide-panel {
+  background: rgba(15,23,42,0.6); backdrop-filter: blur(12px);
+  border: 1px solid #1e293b; border-radius: 20px; padding: 16px;
+  display: flex; flex-direction: column; position: relative; overflow: hidden;
+}
+.tide-header {
+  display: flex; justify-content: space-between;
+  align-items: flex-start; gap: 12px; margin-bottom: 4px;
+}
+.tide-status { display: flex; align-items: center; gap: 10px; }
+.tide-status svg { color: #60a5fa; animation: pulse 2s ease-in-out infinite; }
+.tide-state { font-size: 1.8em; font-weight: 700; color: #fff; line-height: 1.1; }
+.tide-height-badge {
+  background: rgba(2,6,23,0.5); border: 1px solid #1e293b;
+  border-radius: 16px; padding: 8px 16px; text-align: right; flex-shrink: 0;
+}
+.height-value { font-size: 2em; font-weight: 300; color: #93c5fd; line-height: 1; }
+.height-unit { font-size: 0.5em; }
+.height-label {
+  font-size: 10px; color: #94a3b8; text-transform: uppercase;
+  letter-spacing: 0.1em; margin-top: 4px;
+}
+.next-event-text { font-size: 1em; color: #cbd5e1; margin-bottom: 12px; }
+
+/* Chart */
+.chart-container { position: relative; height: 250px; width: 100%; }
+.chart-container canvas { width: 100% !important; height: 100% !important; }
+.chart-unavailable {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 180px; color: #64748b; font-size: 13px;
+}
+
+/* Conditions */
+.conditions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stat-card {
+  background: rgba(15,23,42,0.6); backdrop-filter: blur(12px);
+  border: 1px solid #1e293b; border-radius: 20px; padding: 14px;
+  display: flex; flex-direction: column;
+  transition: transform 0.2s, border-color 0.2s;
+}
+.stat-card:hover { transform: translateY(-2px); border-color: #334155; }
+.stat-icon {
+  padding: 8px; background: rgba(30,41,59,0.5);
+  border-radius: 10px; width: fit-content; margin-bottom: 10px;
+}
+.stat-label {
+  font-size: 10px; color: #94a3b8; text-transform: uppercase;
+  letter-spacing: 0.08em; font-weight: 600; margin-bottom: 4px;
+}
+.stat-value { font-size: 1.1em; font-weight: 600; color: #f1f5f9; }
+
+/* Sun Bar */
+.sun-bar {
+  grid-column: 1 / -1;
+  background: rgba(15,23,42,0.6); backdrop-filter: blur(12px);
+  border: 1px solid #1e293b; border-radius: 20px; padding: 14px;
+  display: flex; justify-content: space-around; align-items: center;
+}
+.sun-item { text-align: center; }
+.sun-item svg { margin: 0 auto 4px; display: block; }
+.sun-label { font-size: 10px; color: #94a3b8; }
+.sun-value { font-weight: 600; font-size: 1em; }
+.sun-divider { width: 1px; height: 40px; background: #334155; }
+
+/* Forecast */
+.forecast-section {
+  background: rgba(15,23,42,0.6); backdrop-filter: blur(12px);
+  border: 1px solid #1e293b; border-radius: 20px; padding: 16px;
+}
+.forecast-title { font-size: 1.15em; font-weight: 600; color: #e2e8f0; margin-bottom: 14px; }
+.forecast-scroll {
+  display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px;
+}
+.forecast-scroll::-webkit-scrollbar { height: 4px; }
+.forecast-scroll::-webkit-scrollbar-track { background: transparent; }
+.forecast-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+.forecast-day {
+  flex: 0 0 auto; min-width: 260px;
+  background: rgba(2,6,23,0.5); border: 1px solid rgba(30,41,59,0.5);
+  border-radius: 14px; padding: 16px; transition: border-color 0.2s;
+}
+.forecast-day:hover { border-color: #334155; }
+.forecast-day-title { color: #60a5fa; font-weight: 600; font-size: 1.05em; margin-bottom: 12px; }
+.forecast-events { display: flex; flex-direction: column; gap: 10px; }
+.forecast-event {
+  display: flex; justify-content: space-between; align-items: center;
+  background: rgba(15,23,42,0.5); padding: 8px 10px; border-radius: 8px;
+}
+.forecast-event-left { display: flex; align-items: center; gap: 10px; }
+.event-icon { padding: 6px; border-radius: 6px; display: flex; }
+.event-icon.high { background: rgba(59,130,246,0.1); color: #60a5fa; }
+.event-icon.low { background: rgba(30,58,138,0.3); color: #2563eb; }
+.forecast-event-time { font-weight: 500; color: #e2e8f0; white-space: nowrap; }
+.forecast-event-height { color: #94a3b8; font-family: ui-monospace, monospace; font-size: 0.85em; white-space: nowrap; }
+
+/* Responsive */
+@media (max-width: 600px) {
+  .conditions-grid { grid-template-columns: repeat(2, 1fr); }
+  .tide-state { font-size: 1.3em; }
+  .height-value { font-size: 1.5em; }
+}
+@media (max-width: 400px) {
+  #content { padding: 8px; gap: 8px; }
+  .tide-panel { padding: 12px; }
+  .chart-container { min-height: 140px; }
+}
+</style>
+<div id="app">
+  <div id="loading-view" class="loading-view">
+    <div class="spinner"></div>
+    <p>Gathering marine data...</p>
+  </div>
+
+  <div id="error-bar" class="error-bar hidden"></div>
+
+  <div id="content" class="hidden">
+    <header class="location-header">
+      <div class="location-row" id="location-name"></div>
+      <div id="source-toggle"></div>
+    </header>
+
+    <section class="tide-panel">
+      <div class="tide-header">
+        <div class="tide-status">
+          <span id="tide-arrow"></span>
+          <h2 class="tide-state" id="tide-state"></h2>
+        </div>
+        <div class="tide-height-badge">
+          <div class="height-value" id="tide-height"></div>
+          <div class="height-label">Current Est</div>
+        </div>
+      </div>
+      <p class="next-event-text" id="next-event-text"></p>
+      <div class="chart-container" id="chart-container">
+        <canvas id="tide-chart"></canvas>
+      </div>
+    </section>
+
+    <section class="conditions-grid" id="conditions-grid"></section>
+
+    <section class="forecast-section">
+      <h3 class="forecast-title">Upcoming Tides</h3>
+      <div class="forecast-scroll" id="forecast-container"></div>
+    </section>
+  </div>
+</div>
+
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script>
+// =============================================
+// API Constants
+// =============================================
+var MARINE_API = 'https://marine-api.open-meteo.com/v1/marine';
+var WEATHER_API = 'https://api.open-meteo.com/v1/forecast';
+var GEO_API = 'https://photon.komoot.io/api';
+var NWS_API = 'https://api.weather.gov';
+var NOAA_STATIONS_API = 'https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions';
+var NOAA_DATA_API = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter';
+
+var cachedNoaaStations = null;
+
+// =============================================
+// State
+// =============================================
+var state = {
+  location: {
+    name: 'Lewes', admin1: 'Delaware', country_code: 'US',
+    latitude: 38.7746, longitude: -75.1393,
+    noaaStation: { id: '8557380', name: 'Lewes', lat: 38.7826, lng: -75.1193 }
+  },
+  dataSource: 'NOAA',
+  appData: null,
+  chartInstance: null,
+  tz: Intl.DateTimeFormat().resolvedOptions().timeZone
+};
+
+// =============================================
+// Chart.js Lazy Loader (ES2022+ browsers only)
+// =============================================
+var chartJsLoader = {
+  status: 'not-loaded',
+  promise: null,
+  supportsES2022: function() {
+    try { new Function('return class { field = 1 }')(); return true; }
+    catch(e) { return false; }
+  },
+  load: function() {
+    if (this.promise) return this.promise;
+    if (!this.supportsES2022()) {
+      this.status = 'unsupported';
+      this.promise = Promise.reject(new Error('Browser does not support Chart.js 4'));
+      return this.promise;
+    }
+    this.status = 'loading';
+    var self = this;
+    this.promise = new Promise(function(resolve, reject) {
+      var script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+      script.onload = function() { self.status = 'loaded'; resolve(window.Chart); };
+      script.onerror = function() { self.status = 'unsupported'; reject(new Error('Failed to load Chart.js')); };
+      document.head.appendChild(script);
+    });
+    return this.promise;
+  }
+};
+
+// =============================================
+// SVG Icons (Lucide paths)
+// =============================================
+var ICON_PATHS = {
+'arrow-up': '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  'arrow-down': '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  thermometer: '<path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>',
+  wind: '<path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>',
+  waves: '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  sunrise: '<path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/>',
+  sunset: '<path d="M12 10V2"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4 4-4-4"/><path d="M16 18a4 4 0 0 0-8 0"/>',
+  navigation: '<polygon points="3 11 22 2 13 21 11 13 3 11"/>',
+  satellite: '<path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>'
+};
+
+function icon(name, size) {
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + (size||24) + '" height="' + (size||24) +
+    '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    (ICON_PATHS[name]||'') + '</svg>';
+}
+
+// =============================================
+// Helper Functions
+// =============================================
+function $(id) { return document.getElementById(id); }
+function show(el) { el.classList.remove('hidden'); }
+function hide(el) { el.classList.add('hidden'); }
+
+function parseGeoResult(data) {
+  if (!data.features || !data.features.length) return null;
+  var props = data.features[0].properties;
+  var coords = data.features[0].geometry.coordinates;
+  return {
+    name: props.name || props.city || props.county || 'Unknown',
+    admin1: props.state || props.country || '',
+    country_code: (props.countrycode || '').toUpperCase(),
+    latitude: coords[1], longitude: coords[0]
+  };
+}
+
+function getWindDir(deg) {
+  return ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg / 45) % 8];
+}
+
+function getMoonPhase(date) {
+  var year = date.getFullYear(), month = date.getMonth() + 1, day = date.getDate();
+  var r = year % 100; r %= 19; if (r > 9) r -= 19;
+  r = ((r * 11) % 30) + month + day; if (month < 3) r += 2;
+  r -= (year < 2000) ? 4 : 8.3; r = Math.floor(r + 0.5) % 30; if (r < 0) r += 30;
+  if (r === 0) return 'New Moon'; if (r < 7) return 'Waxing Crescent';
+  if (r === 7) return 'First Quarter'; if (r < 15) return 'Waxing Gibbous';
+  if (r === 15) return 'Full Moon'; if (r < 22) return 'Waning Gibbous';
+  if (r === 22) return 'Last Quarter'; return 'Waning Crescent';
+}
+
+function getDistanceKm(lat1, lon1, lat2, lon2) {
+  var R = 6371;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLon = (lon2 - lon1) * Math.PI / 180;
+  var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// =============================================
+// Source Toggle
+// =============================================
+function renderSourceToggle() {
+  var el = $('source-toggle');
+  if (state.location.noaaStation) {
+    el.innerHTML =
+      '<div class="source-toggle">' +
+        '<button class="source-btn' + (state.dataSource === 'NOAA' ? ' active-noaa' : '') + '" data-src="NOAA">' +
+          icon('satellite', 14) + ' NOAA Station</button>' +
+        '<button class="source-btn' + (state.dataSource === 'OPEN_METEO' ? ' active-om' : '') + '" data-src="OPEN_METEO">' +
+          icon('globe', 14) + ' Open-Meteo</button>' +
+      '</div>';
+    el.querySelectorAll('.source-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var src = this.getAttribute('data-src');
+        if (state.dataSource !== src) {
+          state.dataSource = src;
+          renderSourceToggle();
+          loadDashboardData();
+        }
+      });
+    });
+  } else {
+    el.innerHTML = '<div class="source-toggle"><span class="source-label">' +
+      icon('globe', 14) + ' Open-Meteo Global Model</span></div>';
+  }
+}
+
+function fetchNoaaStations() {
+  if (cachedNoaaStations) return Promise.resolve(cachedNoaaStations);
+  return fetch(NOAA_STATIONS_API)
+    .then(function(r) { return r.json(); })
+    .then(function(data) { cachedNoaaStations = data.stations; return cachedNoaaStations; });
+}
+
+// =============================================
+// UI State Helpers
+// =============================================
+function showLoading() {
+  show($('loading-view'));
+  hide($('error-bar'));
+  hide($('content'));
+}
+
+function showError(msg) {
+  hide($('loading-view'));
+  $('error-bar').innerHTML = icon('alert', 20) + '<span>' + msg + '</span>';
+  show($('error-bar'));
+}
+
+// =============================================
+// Main Data Loader
+// =============================================
+function loadDashboardData() {
+  showLoading();
+
+  var lat = state.location.latitude;
+  var lon = state.location.longitude;
+  var noaaStation = state.location.noaaStation;
+
+  // Always fetch weather
+  var weatherP = fetch(WEATHER_API + '?latitude=' + lat + '&longitude=' + lon +
+    '&current=temperature_2m,wind_speed_10m,wind_direction_10m&daily=sunrise,sunset' +
+    '&timezone=auto&temperature_unit=fahrenheit&wind_speed_unit=mph&timeformat=unixtime')
+    .then(function(r) { return r.json(); });
+
+  var tideP;
+
+  // PATH A: NOAA
+  if (state.dataSource === 'NOAA' && noaaStation) {
+    tideP = fetchNoaaTideData(lat, lon, noaaStation);
+  }
+  // PATH B: Open-Meteo
+  else {
+    tideP = fetchOpenMeteoTideData(lat, lon);
+  }
+
+  Promise.all([weatherP, tideP])
+    .then(function(results) {
+      var weatherData = results[0];
+      var tideResult = results[1]; // { allLevels, allTimes, events, tz, waveFt }
+
+      var allLevels = tideResult.allLevels;
+      var allTimes = tideResult.allTimes;
+      var events = tideResult.events;
+      var tz = tideResult.tz || weatherData.timezone || 'UTC';
+      var waveFt = tideResult.waveFt;
+
+      // Use weather tz for NOAA path
+      if (state.dataSource === 'NOAA' && noaaStation) tz = weatherData.timezone;
+
+      processAndRender(weatherData, allLevels, allTimes, events, tz, waveFt);
+    })
+    .catch(function(err) {
+      console.error(err);
+      showError(err.message);
+    });
+}
+
+// =============================================
+// NWS Wave Height (US only, via api.weather.gov)
+// =============================================
+var NWS_FETCH_OPTS = { headers: { 'User-Agent': 'SharpToolsOceanTides/1.0' } };
+
+// Check a single point: returns { coastal: true, gridId, gridX, gridY } or { coastal: false }
+// Uses the points response `type` field ("marine" vs "land") as the discriminator.
+function checkNwsPoint(lat, lon) {
+  return fetch(NWS_API + '/points/' + lat.toFixed(4) + ',' + lon.toFixed(4), NWS_FETCH_OPTS)
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) return { coastal: false };
+      var props = data.properties;
+      if (props.type === 'marine') {
+        return { coastal: true, gridId: props.gridId, gridX: props.gridX, gridY: props.gridY };
+      }
+      return { coastal: false };
+    })
+    .catch(function() { return { coastal: false }; });
+}
+
+// Find a coastal NWS grid point, starting from the given coordinates
+// and expanding outward in a ring pattern if the initial point is on land.
+function findCoastalNwsGrid(lat, lon) {
+  return checkNwsPoint(lat, lon).then(function(result) {
+    if (result.coastal) return result;
+
+    // Expand outward in rings: ~2.5km increments (0.025 degrees)
+    // 8 compass directions per ring, up to 4 rings (~10km max)
+    var step = 0.025;
+    var directions = [
+      [0,1], [1,1], [1,0], [1,-1], [0,-1], [-1,-1], [-1,0], [-1,1]
+    ];
+
+    function tryRing(ring) {
+      if (ring > 4) return Promise.resolve(null); // Give up after ~10km
+      var promises = directions.map(function(d) {
+        return checkNwsPoint(lat + d[0] * step * ring, lon + d[1] * step * ring);
+      });
+      return Promise.all(promises).then(function(results) {
+        for (var i = 0; i < results.length; i++) {
+          if (results[i].coastal) return results[i];
+        }
+        return tryRing(ring + 1);
+      });
+    }
+
+    return tryRing(1);
+  });
+}
+
+// Fetch wave height from a coastal NWS gridpoint
+function fetchNwsWaveHeight(lat, lon) {
+  return findCoastalNwsGrid(lat, lon).then(function(grid) {
+    if (!grid) return null; // No coastal grid found
+    return fetch(NWS_API + '/gridpoints/' + grid.gridId + '/' + grid.gridX + ',' + grid.gridY, NWS_FETCH_OPTS)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data) return null;
+        var wh = data.properties && data.properties.waveHeight;
+        if (!wh || !wh.values || !wh.values.length) return null;
+
+        // Find the current wave height from the forecast time ranges
+        var now = new Date().toISOString();
+        var currentValue = null;
+        wh.values.forEach(function(entry) {
+          // entry.validTime is ISO 8601 interval: "2026-04-09T12:00:00+00:00/PT7H"
+          var parts = entry.validTime.split('/');
+          var start = new Date(parts[0]);
+          // Parse ISO 8601 duration (P[n]DT[n]H format)
+          var dur = parts[1] || '';
+          var hours = 0;
+          var dayMatch = dur.match(/(\d+)D/);
+          var hourMatch = dur.match(/(\d+)H/);
+          if (dayMatch) hours += parseInt(dayMatch[1]) * 24;
+          if (hourMatch) hours += parseInt(hourMatch[1]);
+          var end = new Date(start.getTime() + hours * 3600000);
+
+          var nowMs = Date.now();
+          if (nowMs >= start.getTime() && nowMs < end.getTime()) {
+            currentValue = entry.value; // meters
+          }
+        });
+
+        // If no current match, use the first future entry
+        if (currentValue === null) {
+          var nowMs = Date.now();
+          for (var i = 0; i < wh.values.length; i++) {
+            var start = new Date(wh.values[i].validTime.split('/')[0]);
+            if (start.getTime() >= nowMs) {
+              currentValue = wh.values[i].value;
+              break;
+            }
+          }
+        }
+
+        if (currentValue === null) return null;
+        return currentValue * 3.28084; // meters to feet
+      });
+  }).catch(function() { return null; });
+}
+
+function fetchNoaaTideData(lat, lon, noaaStation) {
+  var d = new Date(); d.setDate(d.getDate() - 1);
+  var beginDate = d.toISOString().slice(0,10).replace(/-/g,'');
+  d.setDate(d.getDate() + 6);
+  var endDate = d.toISOString().slice(0,10).replace(/-/g,'');
+
+  // Subordinate stations (type "S") only support hilo predictions.
+  // Use the reference station for the interval=6 tide curve data.
+  var curveStationId = (noaaStation.type === 'S' && noaaStation.reference_id)
+    ? noaaStation.reference_id : noaaStation.id;
+
+  return Promise.all([
+    fetch(NOAA_DATA_API + '?begin_date=' + beginDate + '&end_date=' + endDate +
+      '&station=' + curveStationId + '&product=predictions&datum=MLLW&time_zone=gmt&interval=6&units=english&format=json')
+      .then(function(r) { return r.json(); }),
+    fetch(NOAA_DATA_API + '?begin_date=' + beginDate + '&end_date=' + endDate +
+      '&station=' + noaaStation.id + '&product=predictions&datum=MLLW&time_zone=gmt&interval=hilo&units=english&format=json')
+      .then(function(r) { return r.json(); }),
+    // Use NWS API for wave height (US gov source), starting from the tide station coords
+    fetchNwsWaveHeight(noaaStation.lat || lat, noaaStation.lng || lon)
+  ]).then(function(results) {
+    var curveRes = results[0], hiloRes = results[1], waveFt = results[2];
+    if (curveRes.error) throw new Error('NOAA Error: ' + curveRes.error.message);
+
+    var allTimes = curveRes.predictions.map(function(p) { return new Date(p.t + 'Z').getTime(); });
+    var allLevels = curveRes.predictions.map(function(p) { return parseFloat(p.v); });
+    var events = hiloRes.predictions.map(function(p) {
+      return { type: p.type === 'H' ? 'high' : 'low', time: new Date(p.t + 'Z').getTime(), height: parseFloat(p.v) };
+    });
+
+    return { allLevels: allLevels, allTimes: allTimes, events: events, tz: null, waveFt: waveFt };
+  });
+}
+
+function fetchOpenMeteoTideData(lat, lon) {
+  return fetch(MARINE_API + '?latitude=' + lat + '&longitude=' + lon +
+    '&hourly=wave_height,sea_level_height_msl&past_days=1&forecast_days=5&timezone=auto&timeformat=unixtime')
+    .then(function(r) { return r.json(); })
+    .then(function(marineData) {
+      if (marineData.error) throw new Error('Failed to fetch marine data.');
+      var rawLevels = (marineData.hourly && marineData.hourly.sea_level_height_msl) || [];
+      if (rawLevels.every(function(l) { return l === null; })) throw new Error('No coastal tide data found.');
+
+      var isMeters = marineData.hourly_units && marineData.hourly_units.sea_level_height_msl === 'm';
+      var mslLevels = rawLevels.map(function(l) { return l === null ? 0 : (isMeters ? l * 3.28084 : l); });
+      var mllwOffset = Math.abs(Math.min.apply(null, mslLevels)) + 0.2;
+      var allLevels = mslLevels.map(function(l) { return l + mllwOffset; });
+      var allTimes = marineData.hourly.time.map(function(t) { return t * 1000; });
+
+      // Extrema detection with plateau handling
+      var events = [];
+      for (var i = 1; i < allLevels.length - 1; i++) {
+        var prev = allLevels[i - 1], curr = allLevels[i], nextIdx = i + 1;
+        while (nextIdx < allLevels.length && allLevels[nextIdx] === curr) nextIdx++;
+        if (nextIdx >= allLevels.length) break;
+        var next = allLevels[nextIdx];
+        var isHigh = curr > prev && curr > next;
+        var isLow = curr < prev && curr < next;
+        if (isHigh || isLow) {
+          var plateauWidth = nextIdx - i;
+          if (plateauWidth > 1) {
+            var midFrac = (plateauWidth - 1) / 2;
+            events.push({ type: isHigh ? 'high' : 'low', time: allTimes[i] + midFrac * 3600000, height: curr });
+            i = nextIdx - 1;
+          } else {
+            var a = (prev - 2*curr + next) / 2, b = (next - prev) / 2;
+            var off = a !== 0 ? -b / (2*a) : 0;
+            off = Math.max(-1, Math.min(1, off));
+            events.push({ type: isHigh ? 'high' : 'low', time: allTimes[i] + off * 3600000, height: a*off*off + b*off + curr });
+          }
+        }
+      }
+
+      var waveIdx = Math.max(0, marineData.hourly.time.findIndex(function(t) { return t * 1000 > Date.now(); }) - 1);
+      var rawWave = marineData.hourly.wave_height[waveIdx];
+      var waveFt = rawWave ? (marineData.hourly_units.wave_height === 'm' ? rawWave * 3.28084 : rawWave) : 0;
+
+      return { allLevels: allLevels, allTimes: allTimes, events: events, tz: marineData.timezone || 'UTC', waveFt: waveFt };
+    });
+}
+
+// =============================================
+// Process & Render
+// =============================================
+function processAndRender(weatherData, allLevels, allTimes, events, tz, waveFt) {
+  var fmtTime = function(ms) { return new Date(ms).toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }); };
+  var fmtDate = function(ms) { return new Date(ms).toLocaleDateString([], { timeZone: tz, weekday: 'long', month: 'short', day: 'numeric' }); };
+
+  var now = Date.now();
+  var currentIndex = allTimes.findIndex(function(t) { return t > now; }) - 1;
+  if (currentIndex < 0) currentIndex = 0;
+
+  var windowStart = allTimes[currentIndex];
+  var windowEnd = allTimes[currentIndex + 1] || (windowStart + (allTimes[1] - allTimes[0]));
+  var timeFrac = Math.max(0, Math.min(1, (now - windowStart) / (windowEnd - windowStart)));
+
+  var isHighRes = allTimes[1] - allTimes[0] < 3600000;
+  var offsetPast = isHighRes ? 60 : 6;
+  var offsetFuture = isHighRes ? 180 : 18;
+  var startIdx = Math.max(0, currentIndex - offsetPast);
+  var endIdx = Math.min(allLevels.length, startIdx + offsetPast + offsetFuture);
+
+  var exactProgressIndex = (currentIndex - startIdx) + timeFrac;
+  var exactTideHeight = allLevels[currentIndex] + (allLevels[currentIndex+1] - allLevels[currentIndex]) * timeFrac;
+
+  var futureEvents = events.filter(function(e) { return e.time > now; });
+  var nextEvent = futureEvents[0] || null;
+
+  var forecastDays = [];
+  futureEvents.forEach(function(ev) {
+    var dayStr = fmtDate(ev.time);
+    var dayGroup = forecastDays.find(function(d) { return d.day === dayStr; });
+    if (!dayGroup && forecastDays.length < 4) {
+      dayGroup = { day: dayStr, events: [] };
+      forecastDays.push(dayGroup);
+    }
+    if (dayGroup) dayGroup.events.push({ type: ev.type, time: fmtTime(ev.time), height: ev.height.toFixed(1) + ' ft' });
+  });
+
+  state.tz = tz;
+  state.appData = {
+    tz: tz,
+    chart: {
+      levels: allLevels.slice(startIdx, endIdx),
+      times: allTimes.slice(startIdx, endIdx),
+      exactProgressIndex: exactProgressIndex,
+      exactTideHeight: exactTideHeight
+    },
+    current: {
+      exactTideHeight: exactTideHeight,
+      tideState: nextEvent ? (nextEvent.type === 'high' ? 'Rising Tide' : 'Falling Tide') : 'Calculating...',
+      nextEvent: nextEvent ? { type: nextEvent.type, formattedTime: fmtTime(nextEvent.time) } : null,
+      temp: Math.round(weatherData.current.temperature_2m) + '\u00B0F',
+      wind: getWindDir(weatherData.current.wind_direction_10m) + ' ' + Math.round(weatherData.current.wind_speed_10m) + ' mph',
+      wave: waveFt == null ? 'N/A' : (waveFt > 0 ? waveFt.toFixed(1) + ' ft' : 'Flat'),
+      moon: getMoonPhase(new Date()),
+      sunrise: fmtTime(weatherData.daily.sunrise[0] * 1000),
+      sunset: fmtTime(weatherData.daily.sunset[0] * 1000)
+    },
+    forecast: forecastDays
+  };
+
+  renderContent();
+}
+
+// =============================================
+// Rendering
+// =============================================
+function renderContent() {
+  hide($('loading-view'));
+  hide($('error-bar'));
+  show($('content'));
+
+  var data = state.appData;
+
+  // Location
+  $('location-name').innerHTML = icon('navigation', 20) + ' ' + state.location.name + ', ' + state.location.admin1;
+
+  // Source toggle
+  renderSourceToggle();
+
+  // Tide status
+  var isRising = data.current.tideState === 'Rising Tide';
+  $('tide-arrow').innerHTML = icon(isRising ? 'arrow-up' : 'arrow-down', 32);
+  $('tide-state').textContent = data.current.tideState;
+  $('tide-height').innerHTML = data.current.exactTideHeight.toFixed(1) + ' <span class="height-unit">ft</span>';
+
+  if (data.current.nextEvent) {
+    $('next-event-text').textContent = 'Next ' + (data.current.nextEvent.type === 'high' ? 'High' : 'Low') + ' at ' + data.current.nextEvent.formattedTime;
+  } else {
+    $('next-event-text').textContent = '';
+  }
+
+  // Conditions
+  renderConditions(data);
+
+  // Forecast
+  renderForecast(data);
+
+  // Chart
+  renderChart(data);
+}
+
+function renderConditions(data) {
+  var cards = [
+    { icon: 'thermometer', label: 'Air Temp', value: data.current.temp, color: '#fb923c' },
+    { icon: 'wind', label: 'Wind', value: data.current.wind, color: '#2dd4bf' },
+    { icon: 'waves', label: 'Wave Height', value: data.current.wave, color: '#60a5fa' },
+    { icon: 'moon', label: 'Moon Phase', value: data.current.moon, color: '#a5b4fc' }
+  ];
+  var html = '';
+  cards.forEach(function(c) {
+    html += '<div class="stat-card"><div class="stat-icon" style="color:' + c.color + '">' +
+      icon(c.icon, 24) + '</div><div class="stat-label">' + c.label +
+      '</div><div class="stat-value">' + c.value + '</div></div>';
+  });
+  html += '<div class="sun-bar">' +
+    '<div class="sun-item"><div style="color:#fbbf24">' + icon('sunrise', 24) + '</div><div class="sun-label">Sunrise</div><div class="sun-value">' + data.current.sunrise + '</div></div>' +
+    '<div class="sun-divider"></div>' +
+    '<div class="sun-item"><div style="color:#c084fc">' + icon('sunset', 24) + '</div><div class="sun-label">Sunset</div><div class="sun-value">' + data.current.sunset + '</div></div>' +
+  '</div>';
+  $('conditions-grid').innerHTML = html;
+}
+
+function renderForecast(data) {
+  var html = '';
+  data.forecast.forEach(function(day) {
+    html += '<div class="forecast-day"><div class="forecast-day-title">' + day.day + '</div><div class="forecast-events">';
+    day.events.forEach(function(ev) {
+      var h = ev.type === 'high';
+      html += '<div class="forecast-event"><div class="forecast-event-left">' +
+        '<div class="event-icon ' + (h ? 'high' : 'low') + '">' + icon(h ? 'arrow-up' : 'arrow-down', 16) + '</div>' +
+        '<span class="forecast-event-time">' + ev.time + '</span></div>' +
+        '<span class="forecast-event-height">' + ev.height + '</span></div>';
+    });
+    html += '</div></div>';
+  });
+  $('forecast-container').innerHTML = html;
+}
+
+function renderChart(data) {
+  var container = $('chart-container');
+
+  // Destroy previous chart
+  if (state.chartInstance) {
+    state.chartInstance.destroy();
+    state.chartInstance = null;
+  }
+
+  if (chartJsLoader.status === 'unsupported') {
+    container.innerHTML = '<div class="chart-unavailable">Chart unavailable on this browser</div>';
+    return;
+  }
+
+  // Ensure canvas exists
+  if (!container.querySelector('canvas')) {
+    container.innerHTML = '<canvas id="tide-chart"></canvas>';
+  }
+
+  chartJsLoader.load().then(function(Chart) {
+    var canvas = $('tide-chart');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var chart = data.chart;
+    var tz = state.tz;
+    var isNoaa = state.dataSource === 'NOAA';
+
+    var labels = chart.times.map(function(t) {
+      return new Date(t).toLocaleTimeString([], { timeZone: tz, hour: 'numeric' })
+        .replace(' AM', 'am').replace(' PM', 'pm');
+    });
+
+    var levels = chart.levels;
+    var minL = Math.min.apply(null, levels);
+    var maxL = Math.max.apply(null, levels);
+
+    var chartData = {
+      labels: labels,
+      datasets: [{
+        fill: true, data: levels, borderColor: '#60A5FA', borderWidth: isNoaa ? 3 : 4,
+        backgroundColor: function(context) {
+          var area = context.chart.chartArea;
+          if (!area) return 'rgba(59,130,246,0.2)';
+          var g = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+          g.addColorStop(0, 'rgba(59,130,246,0.4)');
+          g.addColorStop(1, 'rgba(30,58,138,0)');
+          return g;
+        }
+      }]
+    };
+
+    var options = {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(15,23,42,0.9)', titleColor: '#94a3b8',
+          bodyColor: '#60A5FA', bodyFont: { size: 16, weight: 'bold' },
+          padding: 12, displayColors: false,
+          callbacks: {
+            title: function(ctx) {
+              return new Date(chart.times[ctx[0].dataIndex])
+                .toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+            },
+            label: function(ctx) { return ctx.parsed.y.toFixed(1) + ' ft'; }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(71,85,105,0.1)', drawBorder: false },
+          ticks: { color: '#94a3b8', maxTicksLimit: isNoaa ? 6 : 8, maxRotation: 0 }
+        },
+        y: { display: false, min: minL - 0.5, max: maxL + 0.5 }
+      },
+      elements: {
+        point: { radius: 0, hitRadius: 20, hoverRadius: 6, hoverBackgroundColor: '#60A5FA', hoverBorderColor: '#fff' },
+        line: { tension: isNoaa ? 0.2 : 0.4 }
+      }
+    };
+
+    var epi = chart.exactProgressIndex;
+    var eth = chart.exactTideHeight;
+    var timePlugin = {
+      id: 'currentTimeIndicator',
+      afterDraw: function(ch) {
+        var cx = ch.ctx, area = ch.chartArea, yScale = ch.scales.y;
+        if (!area) return;
+        var frac = epi / (ch.data.labels.length - 1);
+        var xC = area.left + (area.right - area.left) * frac;
+        var yC = yScale.getPixelForValue(eth);
+        cx.save();
+        cx.beginPath(); cx.setLineDash([4,4]);
+        cx.moveTo(xC, area.top); cx.lineTo(xC, area.bottom);
+        cx.lineWidth = 2; cx.strokeStyle = '#F87171'; cx.stroke();
+        cx.beginPath(); cx.arc(xC, yC, 6, 0, Math.PI*2);
+        cx.fillStyle = '#F87171'; cx.fill();
+        cx.beginPath(); cx.arc(xC, yC, 14, 0, Math.PI*2);
+        cx.fillStyle = 'rgba(248,113,113,0.3)'; cx.fill();
+        cx.restore();
+      }
+    };
+
+    state.chartInstance = new Chart(ctx, {
+      type: 'line', data: chartData, options: options, plugins: [timePlugin]
+    });
+  }).catch(function() {
+    container.innerHTML = '<div class="chart-unavailable">Chart unavailable on this browser</div>';
+  });
+}
+
+// =============================================
+// Handle Location Setting (geocode on startup)
+// =============================================
+function initWithLocation(locationStr) {
+  if (!locationStr || !locationStr.trim()) {
+    loadDashboardData();
+    return;
+  }
+  showLoading();
+  console.debug('Geocoding location: ' + locationStr);
+  fetch(GEO_API + '?q=' + encodeURIComponent(locationStr) + '&limit=1')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var geo = parseGeoResult(data);
+      console.debug('Geocode result: ', geo);
+      if (!geo) {
+        console.debug('No geocode result found.');
+        return loadDashboardData(); // fallback to default
+      }
+      state.location = {
+        name: geo.name, admin1: geo.admin1,
+        country_code: geo.country_code,
+        latitude: geo.latitude, longitude: geo.longitude,
+        noaaStation: null
+      };
+      if (geo.country_code === 'US') {
+        console.debug('Finding nearest NOAA station for US location...');
+        return fetchNoaaStations().then(function(stations) {
+          var nearest = null, minDist = Infinity;
+          stations.forEach(function(st) {
+            var dist = getDistanceKm(geo.latitude, geo.longitude, st.lat, st.lng);
+            if (dist < minDist) { minDist = dist; nearest = st; }
+          });
+          if (nearest && minDist < 50) {
+            state.location.noaaStation = nearest;
+            console.debug('Nearest NOAA station: ', nearest, 'Distance (km): ', minDist);
+          } else {
+            console.debug('No nearby NOAA station found. Nearest: ', nearest, 'Distance (km): ', minDist);
+          }
+          state.dataSource = state.location.noaaStation ? 'NOAA' : 'OPEN_METEO';
+          loadDashboardData();
+        });
+      }
+      state.dataSource = 'OPEN_METEO';
+      loadDashboardData();
+    })
+    .catch(function(error) { 
+      console.error('Geocoding error.', error);
+      loadDashboardData(); 
+    });
+}
+
+// =============================================
+// Startup
+// =============================================
+if (typeof stio !== 'undefined') {
+  stio.ready(function(data) {
+    var settings = data.settings || {};
+    initWithLocation(settings.location);
+  });
+} else {
+  document.addEventListener('DOMContentLoaded', function() { initWithLocation(''); });
+}
+</script>
+
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {"type": "STRING", "name": "location", "label": "Coastal City (eg. Virginia Beach, VA)"}
+  ],
+  "name": "Ocean Tides"
+}
+</script>
+<!-- Do not edit above -->

@@ -1,0 +1,300 @@
+<script src="//cdn.sharptools.io/js/custom-tiles.js"></script>
+
+<div class="container">
+  <div class="left-column">
+    <div id="logo-wrap" style="display:none;">
+      <img id="logo" alt="Logo" />
+    </div>
+    <div class="clock-area">
+      <div id="time">
+        <span id="time-main"></span><sup id="time-seconds"></sup>
+      </div>
+      <div id="date"></div>
+    </div>
+  </div>
+  <div class="right-column">
+    <div class="header-area">
+      <div id="title"></div>
+      <div id="subtitle"></div>
+    </div>
+    <div id="greeting"></div>
+  </div>
+</div>
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+
+  .container {
+    display: flex;
+    height: 100%;
+    padding: 3.5% 4.5%;
+    box-sizing: border-box;
+    gap: 4%;
+  }
+
+  /* ---- Left column: logo + clock ---- */
+  .left-column {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  #logo-wrap {
+    max-width: 100%;
+  }
+  #logo {
+    max-height: 30vh;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .clock-area {
+    white-space: nowrap;
+  }
+
+  #time {
+    font-weight: 700;
+    line-height: 1;
+  }
+  #time-main {
+    font-size: 22vh;
+  }
+  #time-seconds {
+    font-size: 9vh;
+    opacity: 0.85;
+    vertical-align: super;
+    margin-left: 1px;
+  }
+
+  #date {
+    font-size: 8vh;
+    font-weight: 600;
+    opacity: 0.9;
+    margin-top: 0.2em;
+    line-height: 1.3;
+  }
+
+  /* ---- Right column: title/subtitle + greeting ---- */
+  .right-column {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+  }
+
+  .header-area {
+    min-width: 0;
+  }
+
+  #title {
+    font-size: 16vh;
+    font-weight: 700;
+    line-height: 1.15;
+    word-wrap: break-word;
+  }
+
+  #subtitle {
+    font-size: 8vh;
+    opacity: 0.85;
+    margin-top: 0.25em;
+    line-height: 1.3;
+    word-wrap: break-word;
+  }
+
+  #greeting {
+    font-size: 24vh;
+    font-style: italic;
+    font-weight: 700;
+    line-height: 1.1;
+    word-wrap: break-word;
+  }
+</style>
+
+<script>
+  /* ---- Helpers ---- */
+  function nl2br(str) {
+    if (!str) return "";
+    return str.replace(/\\n/g, "<br>");
+  }
+
+  /* ---- Google Fonts loader ---- */
+  function loadGoogleFont(fontName) {
+    if (!fontName || fontName === "System Default") return;
+    var encoded = encodeURIComponent(fontName);
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=" + encoded + ":ital,wght@0,400;0,700;1,400;1,700&display=swap";
+    document.head.appendChild(link);
+  }
+
+  function resolveFontFamily(enumValue, customValue) {
+    if (!enumValue || enumValue === "System Default") return "";
+    if (enumValue === "Custom" && customValue) {
+      loadGoogleFont(customValue);
+      return '"' + customValue + '"';
+    }
+    loadGoogleFont(enumValue);
+    return '"' + enumValue + '"';
+  }
+
+  /* ---- Greeting logic ---- */
+  function getGreeting() {
+    var hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return "Good morning.";
+    if (hour >= 12 && hour < 17) return "Good afternoon.";
+    if (hour >= 17 && hour < 21) return "Good evening.";
+    return "Good evening.";
+  }
+
+  /* ---- Clock ---- */
+  function updateClock() {
+    var now = new Date();
+    var h = now.getHours();
+    var m = now.getMinutes();
+    var s = now.getSeconds();
+
+    // 12-hour format
+    var ampm = h >= 12 ? "" : "";
+    var h12 = h % 12 || 12;
+    var mStr = m < 10 ? "0" + m : "" + m;
+    var sStr = s < 10 ? "0" + s : "" + s;
+
+    document.getElementById("time-main").textContent = h12 + ":" + mStr;
+    document.getElementById("time-seconds").textContent = sStr;
+
+    // Date
+    var days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    var months = ["January", "February", "March", "April", "May", "June",
+                  "July", "August", "September", "October", "November", "December"];
+    document.getElementById("date").innerHTML =
+      days[now.getDay()] + ",<br>" + months[now.getMonth()] + " " + now.getDate();
+
+    // Update greeting (changes with time of day)
+    document.getElementById("greeting").textContent = getGreeting();
+  }
+
+  /* ---- Initialization ---- */
+  stio.ready(function(data) {
+    var s = data.settings || {};
+
+    // Logo
+    if (s.logoUrl) {
+      document.getElementById("logo").src = s.logoUrl;
+      document.getElementById("logo-wrap").style.display = "";
+    }
+
+    // Title & subtitle (support \n for line breaks and passthrough HTML)
+    document.getElementById("title").innerHTML = nl2br(s.title);
+    document.getElementById("subtitle").innerHTML = nl2br(s.subtitle);
+
+    // Hide header area if nothing configured
+    if (!s.title && !s.subtitle) {
+      document.querySelector(".header-area").style.display = "none";
+    }
+
+    // Fonts
+    var titleFont = resolveFontFamily(s.titleFont, s.customTitleFont);
+    var greetingFont = resolveFontFamily(s.greetingFont, s.customGreetingFont);
+
+    if (titleFont) {
+      document.getElementById("title").style.fontFamily = titleFont;
+      document.getElementById("subtitle").style.fontFamily = titleFont;
+    }
+    if (greetingFont) {
+      document.getElementById("greeting").style.fontFamily = greetingFont;
+    }
+
+    // Start clock
+    updateClock();
+    setInterval(updateClock, 1000);
+  });
+</script>
+
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "STRING",
+      "name": "logoUrl",
+      "label": "Logo Image URL (optional)"
+    },
+    {
+      "type": "STRING",
+      "name": "title",
+      "label": "Title (e.g. Property Name)"
+    },
+    {
+      "type": "STRING",
+      "name": "subtitle",
+      "label": "Subtitle (e.g. Address)"
+    },
+    {
+      "type": "ENUM",
+      "name": "titleFont",
+      "label": "Title Font",
+      "values": [
+        {"label": "System Default", "value": "System Default"},
+        {"label": "Playfair Display", "value": "Playfair Display"},
+        {"label": "Lora", "value": "Lora"},
+        {"label": "Montserrat", "value": "Montserrat"},
+        {"label": "Raleway", "value": "Raleway"},
+        {"label": "Roboto", "value": "Roboto"},
+        {"label": "Open Sans", "value": "Open Sans"},
+        {"label": "Oswald", "value": "Oswald"},
+        {"label": "Merriweather", "value": "Merriweather"},
+        {"label": "Custom Google Font", "value": "Custom"}
+      ],
+      "default": "System Default"
+    },
+    {
+      "type": "STRING",
+      "name": "customTitleFont",
+      "label": "Custom Title Font Name (from Google Fonts)",
+      "showIf": ["titleFont", "==", "Custom"]
+    },
+    {
+      "type": "ENUM",
+      "name": "greetingFont",
+      "label": "Greeting Font",
+      "values": [
+        {"label": "System Default", "value": "System Default"},
+        {"label": "Dancing Script", "value": "Dancing Script"},
+        {"label": "Great Vibes", "value": "Great Vibes"},
+        {"label": "Pacifico", "value": "Pacifico"},
+        {"label": "Satisfy", "value": "Satisfy"},
+        {"label": "Sacramento", "value": "Sacramento"},
+        {"label": "Playfair Display", "value": "Playfair Display"},
+        {"label": "Lora", "value": "Lora"},
+        {"label": "Montserrat", "value": "Montserrat"},
+        {"label": "Raleway", "value": "Raleway"},
+        {"label": "Custom Google Font", "value": "Custom"}
+      ],
+      "default": "System Default"
+    },
+    {
+      "type": "STRING",
+      "name": "customGreetingFont",
+      "label": "Custom Greeting Font Name (from Google Fonts)",
+      "showIf": ["greetingFont", "==", "Custom"]
+    }
+  ],
+  "name": "Welcome Header",
+  "dimensions": {"height": 1, "width": 3}
+}
+</script>
+<!-- Do not edit above -->

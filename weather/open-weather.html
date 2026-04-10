@@ -2284,7 +2284,8 @@
         //See: https://basmilius.github.io/weather-icons/index-line.html
         var name = METEO_CODE_TO_NAME[code] || code; //in case the raw icon name is passed in
         if(!iconStyle) iconStyle = 'line'
-        return 'https://basmilius.github.io/weather-icons/production/' + iconStyle + '/all/' + name + '.svg'
+        //return 'https://basmilius.github.io/weather-icons/production/' + iconStyle + '/all/' + name + '.svg'
+        return 'https://meteocons.com/icons/' + iconStyle + '/' + name + '.svg'
       },
       getOWIconUrl: function(code){
         return code && 'https://openweathermap.org/img/wn/' + code + '@2x.png'

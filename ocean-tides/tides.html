@@ -237,7 +237,66 @@ var NWS_API = 'https://api.weather.gov';
 var NOAA_STATIONS_API = 'https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions';
 var NOAA_DATA_API = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter';
 
-var cachedNoaaStations = null;
+// Cache TTLs (ms)
+var TTL_DAY = 86400000;
+var TTL_LOCATION = 30 * TTL_DAY;
+var TTL_NWS_POINT = 30 * TTL_DAY;
+var TTL_NWS_ZONE = 30 * TTL_DAY;
+var TTL_NWS_STATIONS = 7 * TTL_DAY;
+var TTL_NOAA_STATIONS = 30 * TTL_DAY;
+
+// =============================================
+// Cache Store (Cache API with in-memory fallback)
+// =============================================
+var memCache = {};
+var CACHE_NAME = 'ocean-tides-v1';
+var hasCacheApi = (function() {
+  try { return typeof caches !== 'undefined' && typeof Response !== 'undefined'; }
+  catch (e) { return false; }
+})();
+
+function cacheKeyUrl(key) {
+  return 'https://ocean-tides.cache/' + encodeURIComponent(key);
+}
+
+var cacheStore = {
+  get: function(key, ttlMs) {
+    var memHit = memCache[key];
+    if (memHit && Date.now() - memHit.at < ttlMs) {
+      return Promise.resolve(memHit.value);
+    }
+    if (!hasCacheApi) return Promise.resolve(null);
+    var url = cacheKeyUrl(key);
+    return caches.open(CACHE_NAME)
+      .then(function(c) { return c.match(url); })
+      .then(function(hit) {
+        if (!hit) return null;
+        var at = parseInt(hit.headers.get('x-cached-at') || '0', 10);
+        if (Date.now() - at >= ttlMs) {
+          caches.open(CACHE_NAME).then(function(c) { c.delete(url); }).catch(function() {});
+          return null;
+        }
+        return hit.json().then(function(value) {
+          memCache[key] = { value: value, at: at };
+          return value;
+        });
+      })
+      .catch(function() { return null; });
+  },
+  set: function(key, value) {
+    memCache[key] = { value: value, at: Date.now() };
+    if (!hasCacheApi) return Promise.resolve();
+    var url = cacheKeyUrl(key);
+    return caches.open(CACHE_NAME)
+      .then(function(c) {
+        var body = JSON.stringify(value);
+        return c.put(url, new Response(body, {
+          headers: { 'content-type': 'application/json', 'x-cached-at': Date.now().toString() }
+        }));
+      })
+      .catch(function() {});
+  }
+};
 
 // =============================================
 // State
@@ -381,10 +440,16 @@ function renderSourceToggle() {
 }
 
 function fetchNoaaStations() {
-  if (cachedNoaaStations) return Promise.resolve(cachedNoaaStations);
-  return fetch(NOAA_STATIONS_API)
-    .then(function(r) { return r.json(); })
-    .then(function(data) { cachedNoaaStations = data.stations; return cachedNoaaStations; });
+  return cacheStore.get('noaa-stations', TTL_NOAA_STATIONS).then(function(cached) {
+    if (cached) return cached;
+    return fetch(NOAA_STATIONS_API)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var stations = data.stations || [];
+        cacheStore.set('noaa-stations', stations);
+        return stations;
+      });
+  });
 }
 
 // =============================================
@@ -411,39 +476,98 @@ function loadDashboardData() {
   var lat = state.location.latitude;
   var lon = state.location.longitude;
   var noaaStation = state.location.noaaStation;
+  var isNoaa = state.dataSource === 'NOAA' && noaaStation;
 
-  // Always fetch weather
+  if (isNoaa) {
+    loadNoaaPath(lat, lon, noaaStation);
+  } else {
+    loadOpenMeteoPath(lat, lon);
+  }
+}
+
+// PATH A: US Government — NOAA tides + NWS waves + NWS observations + local solar
+function loadNoaaPath(lat, lon, noaaStation) {
+  var stationLat = noaaStation.lat || lat;
+  var stationLon = noaaStation.lng || lon;
+
+  // Resolve the NWS point at the user's coordinates (for observations + timezone)
+  // and the coastal grid at the tide station coordinates (for waves) in parallel.
+  // Both are cached after the first run.
+  var landPointP = getNwsPoint(lat, lon);
+  var coastalPointP = findCoastalNwsPoint(stationLat, stationLon);
+  var tideP = fetchNoaaTideData(lat, lon, noaaStation);
+
+  Promise.all([landPointP, coastalPointP, tideP]).then(function(results) {
+    var landPoint = results[0];
+    var coastalPoint = results[1];
+    var tideResult = results[2];
+
+    // Wave height + observations are best-effort — failures fall back to N/A
+    var waveP = coastalPoint
+      ? fetch(NWS_API + '/gridpoints/' + coastalPoint.gridId + '/' + coastalPoint.gridX + ',' + coastalPoint.gridY, NWS_FETCH_OPTS)
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(data) {
+            if (!data || !data.properties || !data.properties.waveHeight) return null;
+            var wh = data.properties.waveHeight;
+            var v = getSeriesValueForNow(wh.values);
+            if (v === null) return null;
+            var unit = String(wh.uom || 'wmoUnit:m');
+            return unit.indexOf(':m') !== -1 ? v * 3.28084 : v;
+          })
+          .catch(function() { return null; })
+      : Promise.resolve(null);
+
+    var obsP = fetchNwsObservation(landPoint).catch(function() { return null; });
+
+    return Promise.all([waveP, obsP]).then(function(extras) {
+      var waveFt = extras[0];
+      var observation = extras[1];
+
+      var tz = (landPoint && landPoint.timezone) ||
+               (coastalPoint && coastalPoint.timezone) ||
+               state.tz || 'UTC';
+      var solar = calculateSunriseSunset(lat, lon, tz);
+
+      var current = {
+        temperatureF: observation ? observation.temperatureF : null,
+        windSpeedMph: observation ? observation.windSpeedMph : null,
+        windDirection: observation ? observation.windDirection : null,
+        sunriseMs: solar.sunrise,
+        sunsetMs: solar.sunset
+      };
+
+      processAndRender(current, tideResult.allLevels, tideResult.allTimes, tideResult.events, tz, waveFt);
+    });
+  }).catch(function(err) {
+    console.error(err);
+    showError(err.message || 'Failed to load NOAA data.');
+  });
+}
+
+// PATH B: Open-Meteo (global fallback) — tides, weather, sunrise, waves all from Open-Meteo
+function loadOpenMeteoPath(lat, lon) {
   var weatherP = fetch(WEATHER_API + '?latitude=' + lat + '&longitude=' + lon +
     '&current=temperature_2m,wind_speed_10m,wind_direction_10m&daily=sunrise,sunset' +
     '&timezone=auto&temperature_unit=fahrenheit&wind_speed_unit=mph&timeformat=unixtime')
     .then(function(r) { return r.json(); });
 
-  var tideP;
-
-  // PATH A: NOAA
-  if (state.dataSource === 'NOAA' && noaaStation) {
-    tideP = fetchNoaaTideData(lat, lon, noaaStation);
-  }
-  // PATH B: Open-Meteo
-  else {
-    tideP = fetchOpenMeteoTideData(lat, lon);
-  }
+  var tideP = fetchOpenMeteoTideData(lat, lon);
 
   Promise.all([weatherP, tideP])
     .then(function(results) {
       var weatherData = results[0];
-      var tideResult = results[1]; // { allLevels, allTimes, events, tz, waveFt }
-
-      var allLevels = tideResult.allLevels;
-      var allTimes = tideResult.allTimes;
-      var events = tideResult.events;
+      var tideResult = results[1];
       var tz = tideResult.tz || weatherData.timezone || 'UTC';
-      var waveFt = tideResult.waveFt;
-
-      // Use weather tz for NOAA path
-      if (state.dataSource === 'NOAA' && noaaStation) tz = weatherData.timezone;
-
-      processAndRender(weatherData, allLevels, allTimes, events, tz, waveFt);
+      var c = weatherData.current || {};
+      var d = weatherData.daily || {};
+      var current = {
+        temperatureF: c.temperature_2m,
+        windSpeedMph: c.wind_speed_10m,
+        windDirection: c.wind_direction_10m,
+        sunriseMs: (d.sunrise && d.sunrise[0]) ? d.sunrise[0] * 1000 : null,
+        sunsetMs: (d.sunset && d.sunset[0]) ? d.sunset[0] * 1000 : null
+      };
+      processAndRender(current, tideResult.allLevels, tideResult.allTimes, tideResult.events, tz, tideResult.waveFt);
     })
     .catch(function(err) {
       console.error(err);
@@ -452,105 +576,319 @@ function loadDashboardData() {
 }
 
 // =============================================
-// NWS Wave Height (US only, via api.weather.gov)
+// NWS API (US gov: api.weather.gov)
+// Used for: marine waves, current weather observations, coastal point resolution
 // =============================================
 var NWS_FETCH_OPTS = { headers: { 'User-Agent': 'SharpToolsOceanTides/1.0' } };
 
-// Check a single point: returns { coastal: true, gridId, gridX, gridY } or { coastal: false }
-// Uses the points response `type` field ("marine" vs "land") as the discriminator.
-function checkNwsPoint(lat, lon) {
-  return fetch(NWS_API + '/points/' + lat.toFixed(4) + ',' + lon.toFixed(4), NWS_FETCH_OPTS)
-    .then(function(r) { return r.ok ? r.json() : null; })
-    .then(function(data) {
-      if (!data) return { coastal: false };
-      var props = data.properties;
-      if (props.type === 'marine') {
-        return { coastal: true, gridId: props.gridId, gridX: props.gridX, gridY: props.gridY };
-      }
-      return { coastal: false };
-    })
-    .catch(function() { return { coastal: false }; });
+// Parse ISO 8601 duration (e.g. "PT7H", "P1DT6H") to milliseconds
+function parseIsoDuration(dur) {
+  var m = String(dur || '').match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+  if (!m) return 0;
+  var d = parseInt(m[1] || 0, 10);
+  var h = parseInt(m[2] || 0, 10);
+  var mi = parseInt(m[3] || 0, 10);
+  var s = parseInt(m[4] || 0, 10);
+  return (((d * 24 + h) * 60 + mi) * 60 + s) * 1000;
 }
 
-// Find a coastal NWS grid point, starting from the given coordinates
-// and expanding outward in a ring pattern if the initial point is on land.
-function findCoastalNwsGrid(lat, lon) {
-  return checkNwsPoint(lat, lon).then(function(result) {
-    if (result.coastal) return result;
+// Find the value in a NWS time-series for the current time
+function getSeriesValueForNow(values) {
+  if (!values || !values.length) return null;
+  var nowMs = Date.now();
+  var mostRecent = null;
+  var nextValue = null;
+  for (var i = 0; i < values.length; i++) {
+    var entry = values[i];
+    if (entry.value === null || entry.value === undefined) continue;
+    var parts = String(entry.validTime || '').split('/');
+    var start = new Date(parts[0]).getTime();
+    if (!isFinite(start)) continue;
+    var end = start + parseIsoDuration(parts[1] || 'PT0S');
+    if (nowMs >= start && nowMs < end) return entry.value;
+    if (start <= nowMs) mostRecent = entry.value;
+    else if (nextValue === null) nextValue = entry.value;
+  }
+  return mostRecent !== null ? mostRecent : nextValue;
+}
 
-    // Expand outward in rings: ~2.5km increments (0.025 degrees)
-    // 8 compass directions per ring, up to 4 rings (~10km max)
-    var step = 0.025;
-    var directions = [
-      [0,1], [1,1], [1,0], [1,-1], [0,-1], [-1,-1], [-1,0], [-1,1]
-    ];
+// Zone classification: marine zones are coastal/offshore/nearshore plus marine zone-id prefixes
+function isMarineZone(zone) {
+  if (!zone) return false;
+  var t = String(zone.type || '').toLowerCase();
+  if (t === 'coastal' || t === 'offshore' || t === 'nearshore' || t === 'marine') return true;
+  var id = String(zone.id || '').toUpperCase();
+  return /^(ANZ|AMZ|GMZ|PZZ|PKZ|PHZ|PMZ|LEZ|LMZ|LSZ|LOZ|SLZ)/.test(id);
+}
 
+// Fetch + cache a /points response (gives us the grid + zone + observation stations)
+function getNwsPoint(lat, lon) {
+  var key = 'nws-point:' + lat.toFixed(3) + ',' + lon.toFixed(3);
+  return cacheStore.get(key, TTL_NWS_POINT).then(function(cached) {
+    if (cached) return cached;
+    return fetch(NWS_API + '/points/' + lat.toFixed(4) + ',' + lon.toFixed(4), NWS_FETCH_OPTS)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.properties) return null;
+        var p = data.properties;
+        var point = {
+          gridId: p.gridId,
+          gridX: p.gridX,
+          gridY: p.gridY,
+          forecastZone: p.forecastZone || '',
+          observationStations: p.observationStations || '',
+          timezone: p.timeZone || ''
+        };
+        cacheStore.set(key, point);
+        return point;
+      })
+      .catch(function() { return null; });
+  });
+}
+
+// Fetch + cache a /zones/forecast/{id} response (used to discriminate marine vs land)
+function getNwsZone(zoneUrl) {
+  if (!zoneUrl) return Promise.resolve(null);
+  var match = String(zoneUrl).match(/\/zones\/forecast\/([A-Z0-9]+)$/i);
+  if (!match) return Promise.resolve(null);
+  var zoneId = match[1].toUpperCase();
+  var key = 'nws-zone:' + zoneId;
+  return cacheStore.get(key, TTL_NWS_ZONE).then(function(cached) {
+    if (cached) return cached;
+    return fetch(zoneUrl, NWS_FETCH_OPTS)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.properties) return null;
+        var zone = {
+          id: zoneId,
+          type: String(data.properties.type || '').toLowerCase(),
+          name: data.properties.name || zoneId
+        };
+        cacheStore.set(key, zone);
+        return zone;
+      })
+      .catch(function() { return null; });
+  });
+}
+
+// Resolve a coastal NWS point (with marine forecast grid). Starts at the given
+// coords and expands outward in rings if the starting zone is land/public.
+// Result is cached by rounded coords so the ring search runs once per location.
+function findCoastalNwsPoint(lat, lon) {
+  var key = 'nws-coastal:' + lat.toFixed(3) + ',' + lon.toFixed(3);
+  return cacheStore.get(key, TTL_NWS_POINT).then(function(cached) {
+    if (cached) return cached;
+
+    // Evaluate one candidate point: returns resolved coastal grid info or null.
+    // Requires both (a) a marine/coastal forecast zone and (b) usable waveHeight
+    // values in the gridpoint — otherwise the resolver could cache a coastal
+    // point whose grid never reports waves and the user would see N/A forever.
+    function evaluate(p) {
+      return getNwsPoint(p.lat, p.lon).then(function(point) {
+        if (!point) return null;
+        return getNwsZone(point.forecastZone).then(function(zone) {
+          if (!isMarineZone(zone)) return null;
+          return fetch(NWS_API + '/gridpoints/' + point.gridId + '/' + point.gridX + ',' + point.gridY, NWS_FETCH_OPTS)
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+              var values = data && data.properties && data.properties.waveHeight && data.properties.waveHeight.values;
+              if (!values || !values.length) return null;
+              var hasData = false;
+              for (var i = 0; i < values.length; i++) {
+                if (values[i] && isFinite(values[i].value)) { hasData = true; break; }
+              }
+              if (!hasData) return null;
+              return {
+                gridId: point.gridId, gridX: point.gridX, gridY: point.gridY,
+                zoneId: zone.id, zoneType: zone.type, timezone: point.timezone
+              };
+            })
+            .catch(function() { return null; });
+        });
+      });
+    }
+
+    // Ring search: 0 = original point, 1-4 = expanding rings (~2.5km increments)
     function tryRing(ring) {
-      if (ring > 4) return Promise.resolve(null); // Give up after ~10km
+      if (ring > 4) return Promise.resolve(null);
+      var step = 0.025;
+      var directions = (ring === 0)
+        ? [[0,0]]
+        : [[0,1],[1,1],[1,0],[1,-1],[0,-1],[-1,-1],[-1,0],[-1,1]];
       var promises = directions.map(function(d) {
-        return checkNwsPoint(lat + d[0] * step * ring, lon + d[1] * step * ring);
+        return evaluate({ lat: lat + d[0]*step*ring, lon: lon + d[1]*step*ring });
       });
       return Promise.all(promises).then(function(results) {
         for (var i = 0; i < results.length; i++) {
-          if (results[i].coastal) return results[i];
+          if (results[i]) return results[i];
         }
         return tryRing(ring + 1);
       });
     }
 
-    return tryRing(1);
+    return tryRing(0).then(function(resolved) {
+      if (resolved) cacheStore.set(key, resolved);
+      return resolved;
+    });
   });
 }
 
-// Fetch wave height from a coastal NWS gridpoint
-function fetchNwsWaveHeight(lat, lon) {
-  return findCoastalNwsGrid(lat, lon).then(function(grid) {
-    if (!grid) return null; // No coastal grid found
-    return fetch(NWS_API + '/gridpoints/' + grid.gridId + '/' + grid.gridX + ',' + grid.gridY, NWS_FETCH_OPTS)
+// =============================================
+// NWS Observation Stations (current weather)
+// =============================================
+function getNwsObservationStations(stationsUrl) {
+  if (!stationsUrl) return Promise.resolve([]);
+  var key = 'nws-stations:' + stationsUrl;
+  return cacheStore.get(key, TTL_NWS_STATIONS).then(function(cached) {
+    if (cached) return cached;
+    return fetch(stationsUrl, NWS_FETCH_OPTS)
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
-        if (!data) return null;
-        var wh = data.properties && data.properties.waveHeight;
-        if (!wh || !wh.values || !wh.values.length) return null;
+        if (!data || !data.features) return [];
+        var stations = data.features
+          .map(function(f) {
+            var url = f && f.id;
+            var m = String(url || '').match(/\/stations\/([A-Z0-9]+)$/i);
+            return m ? { id: m[1].toUpperCase(), url: url } : null;
+          })
+          .filter(function(s) { return !!s; });
+        cacheStore.set(key, stations);
+        return stations;
+      })
+      .catch(function() { return []; });
+  });
+}
 
-        // Find the current wave height from the forecast time ranges
-        var now = new Date().toISOString();
-        var currentValue = null;
-        wh.values.forEach(function(entry) {
-          // entry.validTime is ISO 8601 interval: "2026-04-09T12:00:00+00:00/PT7H"
-          var parts = entry.validTime.split('/');
-          var start = new Date(parts[0]);
-          // Parse ISO 8601 duration (P[n]DT[n]H format)
-          var dur = parts[1] || '';
-          var hours = 0;
-          var dayMatch = dur.match(/(\d+)D/);
-          var hourMatch = dur.match(/(\d+)H/);
-          if (dayMatch) hours += parseInt(dayMatch[1]) * 24;
-          if (hourMatch) hours += parseInt(hourMatch[1]);
-          var end = new Date(start.getTime() + hours * 3600000);
+function measurementToFahrenheit(m) {
+  if (!m || !isFinite(m.value)) return null;
+  var u = String(m.unitCode || '');
+  if (u.indexOf('degC') !== -1) return m.value * 9/5 + 32;
+  return m.value;
+}
 
-          var nowMs = Date.now();
-          if (nowMs >= start.getTime() && nowMs < end.getTime()) {
-            currentValue = entry.value; // meters
-          }
-        });
+function measurementToMph(m) {
+  if (!m || !isFinite(m.value)) return null;
+  var u = String(m.unitCode || '');
+  if (u.indexOf('km_h-1') !== -1) return m.value * 0.621371;
+  if (u.indexOf('m_s-1') !== -1) return m.value * 2.23694;
+  if (u.indexOf('kt') !== -1 || u.indexOf('knot') !== -1) return m.value * 1.15078;
+  return m.value;
+}
 
-        // If no current match, use the first future entry
-        if (currentValue === null) {
-          var nowMs = Date.now();
-          for (var i = 0; i < wh.values.length; i++) {
-            var start = new Date(wh.values[i].validTime.split('/')[0]);
-            if (start.getTime() >= nowMs) {
-              currentValue = wh.values[i].value;
-              break;
-            }
-          }
-        }
+// Try observation stations in order until we find one with usable data (max 3)
+function fetchNwsObservation(point) {
+  if (!point || !point.observationStations) return Promise.resolve(null);
+  return getNwsObservationStations(point.observationStations).then(function(stations) {
+    if (!stations.length) return null;
 
-        if (currentValue === null) return null;
-        return currentValue * 3.28084; // meters to feet
-      });
-  }).catch(function() { return null; });
+    function tryStation(idx) {
+      if (idx >= stations.length || idx >= 3) return Promise.resolve(null);
+      return fetch(stations[idx].url + '/observations/latest', NWS_FETCH_OPTS)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+          if (!data || !data.properties) return tryStation(idx + 1);
+          var p = data.properties;
+          var temp = measurementToFahrenheit(p.temperature);
+          var wind = measurementToMph(p.windSpeed);
+          var dir = (p.windDirection && isFinite(p.windDirection.value)) ? p.windDirection.value : null;
+          if (temp === null && wind === null) return tryStation(idx + 1);
+          return { temperatureF: temp, windSpeedMph: wind, windDirection: dir };
+        })
+        .catch(function() { return tryStation(idx + 1); });
+    }
+    return tryStation(0);
+  });
+}
+
+// =============================================
+// Local solar calculation (sunrise/sunset)
+// Standard algorithm, ~1 minute accuracy. No API call needed.
+// =============================================
+function sinDeg(d) { return Math.sin(d * Math.PI / 180); }
+function cosDeg(d) { return Math.cos(d * Math.PI / 180); }
+function tanDeg(d) { return Math.tan(d * Math.PI / 180); }
+function acosDeg(v) { return Math.acos(v) * 180 / Math.PI; }
+function normAngle(d) { var n = d % 360; return n < 0 ? n + 360 : n; }
+function normHours(h) { var n = h % 24; return n < 0 ? n + 24 : n; }
+
+function dayOfYear(year, month, day) {
+  return Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 0)) / 86400000);
+}
+
+// Returns UTC ms timestamp for sunrise (isSunrise=true) or sunset (false).
+// Returns null for polar day/night.
+function calcSunEvent(lat, lon, year, month, day, isSunrise) {
+  var zenith = 90.833;
+  var N = dayOfYear(year, month, day);
+  var lngHour = lon / 15;
+  var t = N + (((isSunrise ? 6 : 18) - lngHour) / 24);
+  var M = (0.9856 * t) - 3.289;
+  var L = normAngle(M + (1.916 * sinDeg(M)) + (0.020 * sinDeg(2 * M)) + 282.634);
+  var RA = normAngle(Math.atan(0.91764 * tanDeg(L)) * 180 / Math.PI);
+  var Lq = Math.floor(L / 90) * 90;
+  var RAq = Math.floor(RA / 90) * 90;
+  RA = (RA + Lq - RAq) / 15;
+  var sinDec = 0.39782 * sinDeg(L);
+  var cosDec = Math.cos(Math.asin(sinDec));
+  var cosH = (cosDeg(zenith) - (sinDec * sinDeg(lat))) / (cosDec * cosDeg(lat));
+  if (cosH > 1 || cosH < -1) return null;
+  var H = isSunrise ? 360 - acosDeg(cosH) : acosDeg(cosH);
+  H /= 15;
+  var T = H + RA - (0.06571 * t) - 6.622;
+  var UT = normHours(T - lngHour);
+  return Date.UTC(year, month - 1, day) + UT * 3600000;
+}
+
+// Calculate sunrise + sunset for the local calendar day at the given location.
+// Uses the IANA timezone (from NWS point) to determine which calendar day is "today".
+function calculateSunriseSunset(lat, lon, timezone) {
+  var now = new Date();
+  var year, month, day;
+  try {
+    var localDate = now.toLocaleDateString('en-US', {
+      timeZone: timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    var parts = localDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (parts) {
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+      year = parseInt(parts[3], 10);
+    }
+  } catch (e) {}
+  if (!year) {
+    year = now.getUTCFullYear();
+    month = now.getUTCMonth() + 1;
+    day = now.getUTCDate();
+  }
+  return {
+    sunrise: calcSunEvent(lat, lon, year, month, day, true),
+    sunset: calcSunEvent(lat, lon, year, month, day, false)
+  };
+}
+
+// Build a smooth tide curve from hi/low events by half-cosine interpolation
+// between consecutive events. Heights and times at events are exact (authoritative);
+// values between are interpolated estimates.
+function buildCurveFromEvents(events) {
+  var times = [], levels = [];
+  var stepMs = 6 * 60 * 1000; // 6-minute resolution to match NOAA interval=6
+  for (var i = 0; i < events.length - 1; i++) {
+    var a = events[i], b = events[i + 1];
+    var span = b.time - a.time;
+    if (span <= 0) continue;
+    var range = b.height - a.height;
+    for (var t = a.time; t < b.time; t += stepMs) {
+      var phase = (t - a.time) / span;
+      times.push(t);
+      levels.push(a.height + range * (1 - Math.cos(Math.PI * phase)) / 2);
+    }
+  }
+  if (events.length) {
+    var last = events[events.length - 1];
+    times.push(last.time);
+    levels.push(last.height);
+  }
+  return { times: times, levels: levels };
 }
 
 function fetchNoaaTideData(lat, lon, noaaStation) {
@@ -559,31 +897,43 @@ function fetchNoaaTideData(lat, lon, noaaStation) {
   d.setDate(d.getDate() + 6);
   var endDate = d.toISOString().slice(0,10).replace(/-/g,'');
 
-  // Subordinate stations (type "S") only support hilo predictions.
-  // Use the reference station for the interval=6 tide curve data.
-  var curveStationId = (noaaStation.type === 'S' && noaaStation.reference_id)
-    ? noaaStation.reference_id : noaaStation.id;
+  var isSubordinate = (noaaStation.type === 'S');
 
-  return Promise.all([
-    fetch(NOAA_DATA_API + '?begin_date=' + beginDate + '&end_date=' + endDate +
-      '&station=' + curveStationId + '&product=predictions&datum=MLLW&time_zone=gmt&interval=6&units=english&format=json')
-      .then(function(r) { return r.json(); }),
-    fetch(NOAA_DATA_API + '?begin_date=' + beginDate + '&end_date=' + endDate +
-      '&station=' + noaaStation.id + '&product=predictions&datum=MLLW&time_zone=gmt&interval=hilo&units=english&format=json')
-      .then(function(r) { return r.json(); }),
-    // Use NWS API for wave height (US gov source), starting from the tide station coords
-    fetchNwsWaveHeight(noaaStation.lat || lat, noaaStation.lng || lon)
-  ]).then(function(results) {
-    var curveRes = results[0], hiloRes = results[1], waveFt = results[2];
-    if (curveRes.error) throw new Error('NOAA Error: ' + curveRes.error.message);
+  // Reference stations: fetch authoritative interval=6 curve directly.
+  // Subordinate stations: fetch only hilo and synthesize the curve via half-cosine
+  // interpolation between authoritative hi/low events. NOAA's Data API does not
+  // expose interval=6 for subordinate stations, and any continuous curve at a
+  // subordinate station is an approximation per NOAA's own user guidance.
+  var hiloP = fetch(NOAA_DATA_API + '?begin_date=' + beginDate + '&end_date=' + endDate +
+    '&station=' + noaaStation.id + '&product=predictions&datum=MLLW&time_zone=gmt&interval=hilo&units=english&format=json')
+    .then(function(r) { return r.json(); });
 
-    var allTimes = curveRes.predictions.map(function(p) { return new Date(p.t + 'Z').getTime(); });
-    var allLevels = curveRes.predictions.map(function(p) { return parseFloat(p.v); });
-    var events = hiloRes.predictions.map(function(p) {
+  var curveP = isSubordinate
+    ? Promise.resolve(null)
+    : fetch(NOAA_DATA_API + '?begin_date=' + beginDate + '&end_date=' + endDate +
+        '&station=' + noaaStation.id + '&product=predictions&datum=MLLW&time_zone=gmt&interval=6&units=english&format=json')
+        .then(function(r) { return r.json(); });
+
+  return Promise.all([curveP, hiloP]).then(function(results) {
+    var curveRes = results[0], hiloRes = results[1];
+    if (hiloRes.error) throw new Error('NOAA Error: ' + hiloRes.error.message);
+    if (curveRes && curveRes.error) throw new Error('NOAA Error: ' + curveRes.error.message);
+
+    var events = (hiloRes.predictions || []).map(function(p) {
       return { type: p.type === 'H' ? 'high' : 'low', time: new Date(p.t + 'Z').getTime(), height: parseFloat(p.v) };
     });
 
-    return { allLevels: allLevels, allTimes: allTimes, events: events, tz: null, waveFt: waveFt };
+    var allTimes, allLevels;
+    if (isSubordinate) {
+      var curve = buildCurveFromEvents(events);
+      allTimes = curve.times;
+      allLevels = curve.levels;
+    } else {
+      allTimes = (curveRes.predictions || []).map(function(p) { return new Date(p.t + 'Z').getTime(); });
+      allLevels = (curveRes.predictions || []).map(function(p) { return parseFloat(p.v); });
+    }
+
+    return { allLevels: allLevels, allTimes: allTimes, events: events, tz: null };
   });
 }
 
@@ -628,7 +978,11 @@ function fetchOpenMeteoTideData(lat, lon) {
 
       var waveIdx = Math.max(0, marineData.hourly.time.findIndex(function(t) { return t * 1000 > Date.now(); }) - 1);
       var rawWave = marineData.hourly.wave_height[waveIdx];
-      var waveFt = rawWave ? (marineData.hourly_units.wave_height === 'm' ? rawWave * 3.28084 : rawWave) : 0;
+      // Distinguish missing data (null) from genuinely flat seas (0):
+      // null/undefined renders as N/A, 0 renders as Flat, positive as "X.X ft".
+      var waveFt = (rawWave === null || rawWave === undefined)
+        ? null
+        : (marineData.hourly_units.wave_height === 'm' ? rawWave * 3.28084 : rawWave);
 
       return { allLevels: allLevels, allTimes: allTimes, events: events, tz: marineData.timezone || 'UTC', waveFt: waveFt };
     });
@@ -637,7 +991,8 @@ function fetchOpenMeteoTideData(lat, lon) {
 // =============================================
 // Process & Render
 // =============================================
-function processAndRender(weatherData, allLevels, allTimes, events, tz, waveFt) {
+// `current` is a normalized object: { temperatureF, windSpeedMph, windDirection, sunriseMs, sunsetMs }
+function processAndRender(current, allLevels, allTimes, events, tz, waveFt) {
   var fmtTime = function(ms) { return new Date(ms).toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }); };
   var fmtDate = function(ms) { return new Date(ms).toLocaleDateString([], { timeZone: tz, weekday: 'long', month: 'short', day: 'numeric' }); };
 
@@ -685,12 +1040,15 @@ function processAndRender(weatherData, allLevels, allTimes, events, tz, waveFt) 
       exactTideHeight: exactTideHeight,
       tideState: nextEvent ? (nextEvent.type === 'high' ? 'Rising Tide' : 'Falling Tide') : 'Calculating...',
       nextEvent: nextEvent ? { type: nextEvent.type, formattedTime: fmtTime(nextEvent.time) } : null,
-      temp: Math.round(weatherData.current.temperature_2m) + '\u00B0F',
-      wind: getWindDir(weatherData.current.wind_direction_10m) + ' ' + Math.round(weatherData.current.wind_speed_10m) + ' mph',
+      temp: (current.temperatureF != null && isFinite(current.temperatureF))
+        ? Math.round(current.temperatureF) + '\u00B0F' : 'N/A',
+      wind: (current.windSpeedMph != null && isFinite(current.windSpeedMph))
+        ? ((current.windDirection != null ? getWindDir(current.windDirection) + ' ' : '') + Math.round(current.windSpeedMph) + ' mph')
+        : 'N/A',
       wave: waveFt == null ? 'N/A' : (waveFt > 0 ? waveFt.toFixed(1) + ' ft' : 'Flat'),
       moon: getMoonPhase(new Date()),
-      sunrise: fmtTime(weatherData.daily.sunrise[0] * 1000),
-      sunset: fmtTime(weatherData.daily.sunset[0] * 1000)
+      sunrise: current.sunriseMs ? fmtTime(current.sunriseMs) : 'N/A',
+      sunset: current.sunsetMs ? fmtTime(current.sunsetMs) : 'N/A'
     },
     forecast: forecastDays
   };
@@ -887,54 +1245,84 @@ function renderChart(data) {
 
 // =============================================
 // Handle Location Setting (geocode on startup)
+// Two-level cache: a resolved location entry stores the geocode + nearest NOAA
+// station so periodic refreshes skip both the geocode call and the stations
+// list lookup entirely.
 // =============================================
+function locationCacheKey(locationStr) {
+  return 'location:' + locationStr.trim().toLowerCase();
+}
+
+function applyResolvedLocation(resolved) {
+  state.location = {
+    name: resolved.name, admin1: resolved.admin1,
+    country_code: resolved.country_code,
+    latitude: resolved.latitude, longitude: resolved.longitude,
+    noaaStation: resolved.noaaStation || null
+  };
+  state.dataSource = state.location.noaaStation ? 'NOAA' : 'OPEN_METEO';
+}
+
 function initWithLocation(locationStr) {
   if (!locationStr || !locationStr.trim()) {
     loadDashboardData();
     return;
   }
   showLoading();
-  console.debug('Geocoding location: ' + locationStr);
-  fetch(GEO_API + '?q=' + encodeURIComponent(locationStr) + '&limit=1')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var geo = parseGeoResult(data);
-      console.debug('Geocode result: ', geo);
-      if (!geo) {
-        console.debug('No geocode result found.');
-        return loadDashboardData(); // fallback to default
-      }
-      state.location = {
-        name: geo.name, admin1: geo.admin1,
-        country_code: geo.country_code,
-        latitude: geo.latitude, longitude: geo.longitude,
-        noaaStation: null
-      };
-      if (geo.country_code === 'US') {
-        console.debug('Finding nearest NOAA station for US location...');
-        return fetchNoaaStations().then(function(stations) {
-          var nearest = null, minDist = Infinity;
-          stations.forEach(function(st) {
-            var dist = getDistanceKm(geo.latitude, geo.longitude, st.lat, st.lng);
-            if (dist < minDist) { minDist = dist; nearest = st; }
-          });
-          if (nearest && minDist < 50) {
-            state.location.noaaStation = nearest;
-            console.debug('Nearest NOAA station: ', nearest, 'Distance (km): ', minDist);
-          } else {
-            console.debug('No nearby NOAA station found. Nearest: ', nearest, 'Distance (km): ', minDist);
-          }
-          state.dataSource = state.location.noaaStation ? 'NOAA' : 'OPEN_METEO';
-          loadDashboardData();
-        });
-      }
-      state.dataSource = 'OPEN_METEO';
+
+  var cacheKey = locationCacheKey(locationStr);
+  cacheStore.get(cacheKey, TTL_LOCATION).then(function(cached) {
+    if (cached) {
+      console.debug('Using cached location for "' + locationStr + '":', cached);
+      applyResolvedLocation(cached);
       loadDashboardData();
-    })
-    .catch(function(error) { 
-      console.error('Geocoding error.', error);
-      loadDashboardData(); 
-    });
+      return;
+    }
+
+    console.debug('Geocoding location: ' + locationStr);
+    fetch(GEO_API + '?q=' + encodeURIComponent(locationStr) + '&limit=1')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var geo = parseGeoResult(data);
+        console.debug('Geocode result: ', geo);
+        if (!geo) {
+          console.debug('No geocode result found.');
+          return loadDashboardData();
+        }
+        var resolved = {
+          name: geo.name, admin1: geo.admin1,
+          country_code: geo.country_code,
+          latitude: geo.latitude, longitude: geo.longitude,
+          noaaStation: null
+        };
+        if (geo.country_code === 'US') {
+          console.debug('Finding nearest NOAA station for US location...');
+          return fetchNoaaStations().then(function(stations) {
+            var nearest = null, minDist = Infinity;
+            stations.forEach(function(st) {
+              var dist = getDistanceKm(geo.latitude, geo.longitude, st.lat, st.lng);
+              if (dist < minDist) { minDist = dist; nearest = st; }
+            });
+            if (nearest && minDist < 50) {
+              resolved.noaaStation = nearest;
+              console.debug('Nearest NOAA station: ', nearest, 'Distance (km): ', minDist);
+            } else {
+              console.debug('No nearby NOAA station found. Nearest: ', nearest, 'Distance (km): ', minDist);
+            }
+            cacheStore.set(cacheKey, resolved);
+            applyResolvedLocation(resolved);
+            loadDashboardData();
+          });
+        }
+        cacheStore.set(cacheKey, resolved);
+        applyResolvedLocation(resolved);
+        loadDashboardData();
+      })
+      .catch(function(error) {
+        console.error('Geocoding error.', error);
+        loadDashboardData();
+      });
+  });
 }
 
 // =============================================
@@ -955,7 +1343,13 @@ if (typeof stio !== 'undefined') {
 {
   "schema": "0.2.0",
   "settings": [
-    {"type": "STRING", "name": "location", "label": "Coastal City (eg. Virginia Beach, VA)"}
+    {"type": "STRING", "name": "location", "label": "Coastal City (eg. Virginia Beach, VA)"},
+    {
+      "type": "LABEL",
+      "name": "sourceLabel",
+      "label": "Data Sources",
+      "value": "Data sourced from NOAA CO-OPS, NWS (weather.gov), Open-Meteo, and Photon by Komoot."
+    }
   ],
   "name": "Ocean Tides"
 }

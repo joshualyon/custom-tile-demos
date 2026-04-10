@@ -65,7 +65,7 @@ Learn from these examples in the repository:
 2. **Test Broadly**: Verify functionality across different browsers and devices
 3. **Handle Errors**: Implement user-friendly error messages (see examples)
 4. **Follow Patterns**: Review existing tiles for coding conventions
-5. **Check CLAUDE.md**: Internal development guidelines and patterns
+5. **Check AGENTS.md**: Internal development guidelines and patterns
 
 ### ⚠️ Important Notes
 

@@ -5,7 +5,8 @@ variant supports a 'hack' which is common in some Hubitat community devices wher
 While normal tiles on a SharpTools dashboard won't render the HTML as a security precaution, this proof-of-concept DOES render the HTML.
 This rendering of HTML is allowed in SharpTools Custom Tiles since they are running in a sandboxed context.
 
-> **WARNING**: You should still only run Custom Tile code (and thus injected HTML) from _trusted_ sources! The injected HTML still has 
+> [!WARNING]
+> You should still only run Custom Tile code (and thus injected HTML) from _trusted_ sources! The injected HTML still has 
 access to other items within the context of the Custom Tile.
 
 > [!TIP]

@@ -8,9 +8,11 @@ This rendering of HTML is allowed in SharpTools Custom Tiles since they are runn
 > **WARNING**: You should still only run Custom Tile code (and thus injected HTML) from _trusted_ sources! The injected HTML still has 
 access to other items within the context of the Custom Tile.
 
-Hubitat Only Legacy Version
+> [!TIP]
+> We recently released a new version of the [HTML Attribute Display Custom Tile](https://community.sharptools.io/t/hubitat-html-attribute-display/6597) which uses the newer direct access to SharpTools Things, supports realtime status updates, and doesn't depend on the Hubitat Maker API. 
+>
+> We recommend using the newer version as it is more efficient and doesn't rely on polling like this Hubitat Maker API version did. 
 
-Included below are the original contents of the post describing the first release of this tile which relied on the Hubitat Maker API and thus only worked with Hubitat. The newer version listed above uses the new Custom Tiles: Access to Things and Variables feature.
 
 ### Enable Hubitat Maker API
 

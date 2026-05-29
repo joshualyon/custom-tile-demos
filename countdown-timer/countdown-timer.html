@@ -82,6 +82,10 @@
     box-sizing: border-box;
   }
 
+  #tile.interactive {
+    cursor: pointer;
+  }
+
   .label {
     width: 100%;
     color: var(--muted);
@@ -187,12 +191,19 @@
   #tile.state-error .error-message {
     display: block;
   }
+
+  .error-message.visible {
+    display: block;
+  }
 </style>
 
 <script>
   var timerId = null;
   var targetDate = null;
   var targetPrecision = "datetime";
+  var targetVariable = null;
+  var targetVariableType = "String";
+  var interactionMessageTimer = null;
   var tileSettings = {};
 
   var tileEl = document.getElementById("tile");
@@ -208,14 +219,16 @@
     tileSettings = data.settings || {};
     applySettings(tileSettings);
 
-    var variable = getTargetVariable(tileSettings);
-    if (!variable) {
+    targetVariable = getTargetVariable(tileSettings);
+    targetVariableType = getTargetVariableType(tileSettings);
+    if (!targetVariable) {
       showError("Configure a String or Number variable.");
       return;
     }
 
-    handleVariableValue(variable.value);
-    variable.onValue(handleVariableValue);
+    configureTapAction(tileSettings, targetVariable);
+    handleVariableValue(targetVariable.value);
+    targetVariable.onValue(handleVariableValue);
   });
 
   window.addEventListener("resize", function() {
@@ -247,6 +260,37 @@
     }
 
     return settings.targetStringVariable || settings.targetNumberVariable || null;
+  }
+
+  function getTargetVariableType(settings) {
+    var type = settings.variableType || "String";
+
+    if (type === "Number" && settings.targetNumberVariable) {
+      return "Number";
+    }
+
+    if (type === "String" && settings.targetStringVariable) {
+      return "String";
+    }
+
+    return settings.targetNumberVariable && !settings.targetStringVariable ? "Number" : "String";
+  }
+
+  function configureTapAction(settings, variable) {
+    if ((settings.tapAction || "none") !== "quickSet" || !variable || typeof variable.setValue !== "function") {
+      return;
+    }
+
+    tileEl.classList.add("interactive");
+    tileEl.setAttribute("role", "button");
+    tileEl.setAttribute("tabindex", "0");
+    tileEl.addEventListener("click", openQuickSetList);
+    tileEl.addEventListener("keydown", function(event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openQuickSetList();
+      }
+    });
   }
 
   function handleVariableValue(value) {
@@ -511,6 +555,178 @@
     setOptionalText(targetEl, formatTarget(targetDate, targetPrecision));
   }
 
+  function openQuickSetList() {
+    var items = [
+      { label: "In 15 minutes", value: "set:15m" },
+      { label: "In 30 minutes", value: "set:30m" },
+      { label: "In 1 hour", value: "set:1h" },
+      { label: "In 2 hours", value: "set:2h" },
+      { label: "Tomorrow, same time", value: "set:1d" },
+      { label: "Add 15 minutes", value: "extend:15m" },
+      { label: "Add 1 hour", value: "extend:1h" },
+      { label: "Custom...", value: "custom" }
+    ];
+
+    stio.showList({
+      title: "Set Countdown",
+      items: items
+    }).then(function(selection) {
+      if (!selection) {
+        return;
+      }
+
+      if (selection === "custom") {
+        showCustomTargetForm();
+        return;
+      }
+
+      var target = getQuickActionTarget(selection);
+      if (!target) {
+        showInteractionMessage("Could not read that quick action.");
+        return;
+      }
+
+      setCountdownTarget(target.date, "datetime");
+    });
+  }
+
+  function showCustomTargetForm() {
+    stio.showForm({
+      title: "Set Countdown Target",
+      items: [
+        {
+          name: "target",
+          label: "Target date/time or +1h",
+          type: "STRING",
+          default: getCustomTargetDefault()
+        }
+      ]
+    }).then(function(data) {
+      if (!data || data.target == null || String(data.target).trim() === "") {
+        return;
+      }
+
+      var raw = String(data.target).trim();
+      var parsed = parseCustomTarget(raw);
+      if (parsed.error) {
+        showInteractionMessage(parsed.error);
+        return;
+      }
+
+      setCountdownTarget(parsed.date, parsed.precision, parsed.stringValue);
+    });
+  }
+
+  function parseCustomTarget(value) {
+    var duration = parseDuration(value.charAt(0) === "+" ? value.slice(1) : "");
+    if (duration != null) {
+      return {
+        date: new Date(Date.now() + duration),
+        precision: "datetime"
+      };
+    }
+
+    var parsed = parseTargetDate(value);
+    if (parsed.error) {
+      return parsed;
+    }
+
+    parsed.stringValue = value;
+    return parsed;
+  }
+
+  function getQuickActionTarget(action) {
+    var parts = action.split(":");
+    if (parts.length !== 2) {
+      return null;
+    }
+
+    var mode = parts[0];
+    var duration = parseDuration(parts[1]);
+    if (duration == null) {
+      return null;
+    }
+
+    var now = Date.now();
+    var base = mode === "extend" && targetDate && targetDate.getTime() > now ? targetDate.getTime() : now;
+    return {
+      date: new Date(base + duration)
+    };
+  }
+
+  function parseDuration(value) {
+    var match = String(value).trim().match(/^(\d+)\s*([mhdw])$/i);
+    if (!match) {
+      return null;
+    }
+
+    var amount = Number(match[1]);
+    var unit = match[2].toLowerCase();
+    var multipliers = {
+      m: 60000,
+      h: 3600000,
+      d: 86400000,
+      w: 604800000
+    };
+
+    return amount * multipliers[unit];
+  }
+
+  function setCountdownTarget(date, precision, stringValue) {
+    var value = formatVariableValue(date, precision, stringValue);
+
+    try {
+      var result = targetVariable.setValue(value);
+      handleVariableValue(value);
+
+      Promise.resolve(result).then(function() {
+        stio.showToast("Countdown updated", "green");
+      }).catch(function(error) {
+        console.error("Countdown Timer: could not update variable", error);
+        showInteractionMessage("Could not update the variable.");
+      });
+    } catch (error) {
+      console.error("Countdown Timer: could not update variable", error);
+      showInteractionMessage("Could not update the variable.");
+    }
+  }
+
+  function formatVariableValue(date, precision, stringValue) {
+    if (targetVariableType === "Number") {
+      return date.getTime();
+    }
+
+    if (stringValue) {
+      return stringValue;
+    }
+
+    if (precision === "date") {
+      return formatLocalDate(date);
+    }
+
+    return formatLocalDateTime(date);
+  }
+
+  function getCustomTargetDefault() {
+    if (targetDate) {
+      return targetPrecision === "date" ? formatLocalDate(targetDate) : formatLocalDateTime(targetDate);
+    }
+
+    return formatLocalDateTime(new Date(Date.now() + 3600000));
+  }
+
+  function formatLocalDate(date) {
+    return date.getFullYear() + "-" + padNumber(date.getMonth() + 1) + "-" + padNumber(date.getDate());
+  }
+
+  function formatLocalDateTime(date) {
+    return formatLocalDate(date) + "T" + padNumber(date.getHours()) + ":" + padNumber(date.getMinutes()) + ":" + padNumber(date.getSeconds());
+  }
+
+  function padNumber(value) {
+    return value < 10 ? "0" + value : String(value);
+  }
+
   function getTimeParts(ms) {
     var totalSeconds = Math.max(0, Math.floor(ms / 1000));
     var days = Math.floor(totalSeconds / 86400);
@@ -571,7 +787,25 @@
 
   function clearError() {
     errorEl.textContent = "";
+    errorEl.classList.remove("visible");
     tileEl.classList.remove("state-error");
+  }
+
+  function showInteractionMessage(message) {
+    console.warn("Countdown Timer:", message);
+
+    if (interactionMessageTimer) {
+      clearTimeout(interactionMessageTimer);
+    }
+
+    errorEl.textContent = message;
+    errorEl.classList.add("visible");
+    interactionMessageTimer = setTimeout(function() {
+      if (!tileEl.classList.contains("state-error")) {
+        errorEl.textContent = "";
+        errorEl.classList.remove("visible");
+      }
+    }, 4000);
   }
 
   function showError(message) {
@@ -580,6 +814,11 @@
     if (timerId) {
       clearInterval(timerId);
       timerId = null;
+    }
+
+    if (interactionMessageTimer) {
+      clearTimeout(interactionMessageTimer);
+      interactionMessageTimer = null;
     }
 
     targetDate = null;
@@ -669,6 +908,17 @@
       "name": "showTarget",
       "label": "Show Target Time",
       "default": true,
+      "showIf": ["showAdvanced", "==", true]
+    },
+    {
+      "type": "ENUM",
+      "name": "tapAction",
+      "label": "Tap Action",
+      "values": [
+        {"label": "None", "value": "none"},
+        {"label": "Quick Set / Extend", "value": "quickSet"}
+      ],
+      "default": "none",
       "showIf": ["showAdvanced", "==", true]
     },
     {

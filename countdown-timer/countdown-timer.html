@@ -1,0 +1,716 @@
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+
+<div id="tile" class="theme-transparent state-loading">
+  <main class="countdown-shell" aria-live="polite">
+    <div id="label" class="label hidden"></div>
+    <div id="countdown" class="countdown countdown-text">
+      <span class="primary">--</span>
+    </div>
+    <div id="detail" class="detail hidden"></div>
+    <div id="units" class="units">Loading</div>
+    <div id="target" class="target hidden"></div>
+    <div id="error-message" class="error-message" role="alert"></div>
+  </main>
+</div>
+
+<style>
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    letter-spacing: 0;
+  }
+
+  #tile {
+    --bg-start: #111315;
+    --bg-end: #1d2420;
+    --fg: #f6f3ea;
+    --muted: rgba(246, 243, 234, 0.68);
+    --quiet: rgba(246, 243, 234, 0.48);
+    --accent: #40c7a7;
+    --warning: #f0a33a;
+    --expired: #e56b5d;
+
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg);
+    background: linear-gradient(145deg, var(--bg-start), var(--bg-end));
+  }
+
+  #tile.theme-light {
+    --bg-start: #f7f4ee;
+    --bg-end: #ece7dc;
+    --fg: #171a1c;
+    --muted: rgba(23, 26, 28, 0.68);
+    --quiet: rgba(23, 26, 28, 0.48);
+    --accent: #0f8f7b;
+    --warning: #b66612;
+    --expired: #b94739;
+  }
+
+  #tile.theme-transparent {
+    --fg: #f8f8f3;
+    --muted: rgba(248, 248, 243, 0.78);
+    --quiet: rgba(248, 248, 243, 0.62);
+    --accent: #f8f8f3;
+    --warning: #ffd36a;
+    --expired: #ff8b7e;
+    --bg-start: transparent;
+    --bg-end: transparent;
+    background: transparent;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72), 0 0 10px rgba(0, 0, 0, 0.36);
+  }
+
+  .countdown-shell {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-sizing: border-box;
+  }
+
+  .label {
+    width: 100%;
+    color: var(--muted);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hidden {
+    display: none;
+  }
+
+  .countdown {
+    width: 100%;
+    min-height: 42%;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .countdown-text {
+    color: var(--accent);
+  }
+
+  .primary {
+    display: block;
+    max-width: 100%;
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .units {
+    width: 100%;
+    color: var(--muted);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail,
+  .target {
+    width: 100%;
+    color: var(--quiet);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail {
+    min-height: 1.3em;
+    margin-top: -2px;
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .detail + .units {
+    margin-top: 6px;
+  }
+
+  .target {
+    margin-top: 5px;
+  }
+
+  .error-message {
+    display: none;
+    width: 100%;
+    margin-top: 8px;
+    color: var(--expired);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  #tile.state-warning .countdown-text {
+    color: var(--warning);
+  }
+
+  #tile.state-expired .countdown-text {
+    color: var(--expired);
+  }
+
+  #tile.state-error .countdown,
+  #tile.state-error .units,
+  #tile.state-error .detail,
+  #tile.state-error .target {
+    display: none;
+  }
+
+  #tile.state-error .error-message {
+    display: block;
+  }
+</style>
+
+<script>
+  var timerId = null;
+  var targetDate = null;
+  var targetPrecision = "datetime";
+  var tileSettings = {};
+
+  var tileEl = document.getElementById("tile");
+  var shellEl = document.querySelector(".countdown-shell");
+  var labelEl = document.getElementById("label");
+  var countdownEl = document.getElementById("countdown");
+  var unitsEl = document.getElementById("units");
+  var detailEl = document.getElementById("detail");
+  var targetEl = document.getElementById("target");
+  var errorEl = document.getElementById("error-message");
+
+  stio.ready(function(data) {
+    tileSettings = data.settings || {};
+    applySettings(tileSettings);
+
+    var variable = getTargetVariable(tileSettings);
+    if (!variable) {
+      showError("Configure a String or Number variable.");
+      return;
+    }
+
+    handleVariableValue(variable.value);
+    variable.onValue(handleVariableValue);
+  });
+
+  window.addEventListener("resize", function() {
+    fitCountdown();
+  });
+
+  function applySettings(settings) {
+    var title = settings.title == null ? "" : String(settings.title).trim();
+    var theme = settings.theme || "transparent";
+
+    labelEl.textContent = title;
+    if (title) {
+      labelEl.classList.remove("hidden");
+    } else {
+      labelEl.classList.add("hidden");
+    }
+    tileEl.className = "theme-" + theme + " state-loading";
+  }
+
+  function getTargetVariable(settings) {
+    var type = settings.variableType || "String";
+
+    if (type === "Number" && settings.targetNumberVariable) {
+      return settings.targetNumberVariable;
+    }
+
+    if (type === "String" && settings.targetStringVariable) {
+      return settings.targetStringVariable;
+    }
+
+    return settings.targetStringVariable || settings.targetNumberVariable || null;
+  }
+
+  function handleVariableValue(value) {
+    var parsed = parseTargetDate(value);
+    if (parsed.error) {
+      showError(parsed.error);
+      return;
+    }
+
+    targetDate = parsed.date;
+    targetPrecision = parsed.precision || "datetime";
+    clearError();
+    render();
+    restartTimer();
+  }
+
+  function restartTimer() {
+    if (timerId) {
+      clearInterval(timerId);
+    }
+
+    timerId = setInterval(render, 1000);
+  }
+
+  function parseTargetDate(value) {
+    if (value == null || value === "") {
+      return { error: "The selected variable is empty." };
+    }
+
+    var raw = String(value).trim();
+    var date = null;
+    var precision = "datetime";
+
+    if (typeof value === "number" || /^-?\d+(\.\d+)?$/.test(raw)) {
+      var numericValue = Number(raw);
+      if (!isFinite(numericValue)) {
+        return { error: "The selected variable is not a valid timestamp." };
+      }
+
+      var absoluteValue = Math.abs(numericValue);
+      var millisValue = absoluteValue < 100000000000 ? numericValue * 1000 : numericValue;
+      date = new Date(millisValue);
+      precision = "timestamp";
+    } else {
+      var parsedIso = parseIsoDateTime(raw);
+      if (parsedIso) {
+        date = parsedIso.date;
+        precision = parsedIso.precision;
+      } else {
+        date = new Date(raw);
+      }
+    }
+
+    if (!date || isNaN(date.getTime())) {
+      return { error: "Use an ISO date/time or Unix timestamp." };
+    }
+
+    return {
+      date: date,
+      precision: precision
+    };
+  }
+
+  function parseIsoDateTime(value) {
+    var hasExplicitOffset = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value);
+    if (hasExplicitOffset) {
+      return null;
+    }
+
+    var match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2})(?::(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?)?$/);
+    if (!match) {
+      return null;
+    }
+
+    var year = Number(match[1]);
+    var month = Number(match[2]);
+    var day = Number(match[3]);
+    var hour = Number(match[4] || 0);
+    var minute = Number(match[5] || 0);
+    var second = Number(match[6] || 0);
+    var fraction = match[7] || "0";
+    while (fraction.length < 3) {
+      fraction += "0";
+    }
+    var millisecond = Number(fraction);
+    var date = new Date(year, month - 1, day, hour, minute, second, millisecond);
+
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day ||
+      date.getHours() !== hour ||
+      date.getMinutes() !== minute ||
+      date.getSeconds() !== second
+    ) {
+      return {
+        date: new Date(NaN),
+        precision: "datetime"
+      };
+    }
+
+    return {
+      date: date,
+      precision: match[4] == null ? "date" : "datetime"
+    };
+  }
+
+  function render() {
+    if (!targetDate) {
+      return;
+    }
+
+    var now = Date.now();
+    var diffMs = targetDate.getTime() - now;
+    var isExpired = diffMs <= 0;
+    var expiredBehavior = tileSettings.expiredBehavior || "complete";
+    var showCountUp = isExpired && expiredBehavior === "countUp";
+
+    updateState(diffMs, isExpired, showCountUp);
+
+    if (isExpired && !showCountUp) {
+      renderComplete();
+      return;
+    }
+
+    var parts = getTimeParts(Math.abs(diffMs));
+    var timeFormat = tileSettings.timeFormat || "friendly";
+
+    if (timeFormat === "preciseDetail") {
+      renderPreciseDetail(parts, isExpired);
+    } else if (timeFormat === "precise") {
+      renderPrecise(parts, isExpired);
+    } else {
+      renderFriendly(diffMs, parts, isExpired);
+    }
+
+    renderTarget();
+    fitCountdown();
+  }
+
+  function updateState(diffMs, isExpired, showCountUp) {
+    var warningValue = tileSettings.warningMinutes;
+    var warningMinutes = warningValue == null || warningValue === "" ? 10 : Number(warningValue);
+    var warningMs = isFinite(warningMinutes) && warningMinutes > 0 ? warningMinutes * 60 * 1000 : 0;
+
+    tileEl.classList.remove("state-loading");
+    tileEl.classList.remove("state-running");
+    tileEl.classList.remove("state-warning");
+    tileEl.classList.remove("state-expired");
+
+    if (isExpired) {
+      tileEl.classList.add(showCountUp ? "state-warning" : "state-expired");
+    } else if (warningMs > 0 && diffMs <= warningMs) {
+      tileEl.classList.add("state-warning");
+    } else {
+      tileEl.classList.add("state-running");
+    }
+  }
+
+  function renderComplete() {
+    var finishText = tileSettings.finishText || "Time's Up";
+
+    renderText(finishText, "target reached", "");
+    renderTarget();
+    fitCountdown();
+  }
+
+  function renderText(primary, units, detail) {
+    countdownEl.className = "countdown countdown-text";
+    countdownEl.innerHTML = "";
+    countdownEl.appendChild(makeEl("span", "primary", primary));
+    setOptionalText(unitsEl, units);
+    setOptionalText(detailEl, detail || "");
+  }
+
+  function renderFriendly(diffMs, parts, isExpired) {
+    if (Math.abs(diffMs) < 60000) {
+      renderText(parts.seconds + " " + plural(parts.seconds, "second"), isExpired ? "ago" : "remaining", "");
+      return;
+    }
+
+    renderText(formatRelativeTime(diffMs), "", "");
+  }
+
+  function renderPrecise(parts, isExpired) {
+    renderText(formatPreciseDuration(parts, false).primary, isExpired ? "since target" : "remaining", "");
+  }
+
+  function renderPreciseDetail(parts, isExpired) {
+    var split = formatPreciseDuration(parts);
+    renderText(split.primary, isExpired ? "since target" : "remaining", split.detail);
+  }
+
+  function formatPreciseDuration(parts, includeDetail) {
+    includeDetail = includeDetail !== false;
+
+    if (parts.days > 0) {
+      return {
+        primary: parts.days + "d " + parts.hours + "h",
+        detail: includeDetail ? parts.minutes + "m " + parts.seconds + "s" : ""
+      };
+    }
+
+    if (parts.hours > 0) {
+      return {
+        primary: parts.hours + "h " + parts.minutes + "m",
+        detail: includeDetail ? parts.seconds + "s" : ""
+      };
+    }
+
+    if (parts.minutes > 0) {
+      return {
+        primary: parts.minutes + "m",
+        detail: includeDetail ? parts.seconds + "s" : ""
+      };
+    }
+
+    return {
+      primary: parts.seconds + "s",
+      detail: ""
+    };
+  }
+
+  function formatRelativeTime(diffMs) {
+    var absMs = Math.abs(diffMs);
+    var value = 0;
+    var unit = "minute";
+
+    if (absMs < 45 * 60000) {
+      value = Math.round(diffMs / 60000);
+    } else if (absMs < 90 * 60000) {
+      unit = "hour";
+      value = diffMs > 0 ? 1 : -1;
+    } else if (absMs < 22 * 3600000) {
+      unit = "hour";
+      value = Math.round(diffMs / 3600000);
+    } else if (absMs < 36 * 3600000) {
+      unit = "day";
+      value = diffMs > 0 ? 1 : -1;
+    } else {
+      unit = "day";
+      value = Math.round(diffMs / 86400000);
+    }
+
+    if (value === 0) {
+      value = diffMs > 0 ? 1 : -1;
+    }
+
+    if (typeof Intl !== "undefined" && Intl.RelativeTimeFormat) {
+      return new Intl.RelativeTimeFormat(undefined, { numeric: "always" }).format(value, unit);
+    }
+
+    return value > 0 ? "in " + value + " " + plural(value, unit) : Math.abs(value) + " " + plural(Math.abs(value), unit) + " ago";
+  }
+
+  function renderTarget() {
+    if (tileSettings.showTarget === false || !targetDate) {
+      setOptionalText(targetEl, "");
+      return;
+    }
+
+    setOptionalText(targetEl, formatTarget(targetDate, targetPrecision));
+  }
+
+  function getTimeParts(ms) {
+    var totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    var days = Math.floor(totalSeconds / 86400);
+    totalSeconds -= days * 86400;
+
+    var hours = Math.floor(totalSeconds / 3600);
+    totalSeconds -= hours * 3600;
+
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds - (minutes * 60);
+
+    return {
+      days: days,
+      hours: hours,
+      minutes: minutes,
+      seconds: seconds
+    };
+  }
+
+  function formatTarget(date, precision) {
+    var now = new Date();
+    var options = {
+      month: "short",
+      day: "numeric"
+    };
+
+    if (date.getFullYear() !== now.getFullYear()) {
+      options.year = "numeric";
+    }
+
+    if (precision !== "date") {
+      options.hour = "numeric";
+      options.minute = "2-digit";
+    }
+
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  }
+
+  function fitCountdown() {
+    var primary = countdownEl.querySelector(".primary");
+    if (primary) {
+      fitPrimary(primary);
+    }
+  }
+
+  function fitPrimary(primary) {
+    var maxWidth = Math.max(20, shellEl.clientWidth);
+    var maxHeight = Math.max(20, tileEl.clientHeight * 0.42);
+    var fontSize = Math.min(maxHeight, 128);
+
+    primary.style.fontSize = fontSize + "px";
+
+    while ((primary.scrollWidth > maxWidth || primary.scrollHeight > maxHeight) && fontSize > 16) {
+      fontSize -= 2;
+      primary.style.fontSize = fontSize + "px";
+    }
+  }
+
+  function clearError() {
+    errorEl.textContent = "";
+    tileEl.classList.remove("state-error");
+  }
+
+  function showError(message) {
+    console.error("Countdown Timer:", message);
+
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+
+    targetDate = null;
+    targetPrecision = "datetime";
+    errorEl.textContent = message;
+    tileEl.className = "theme-" + (tileSettings.theme || "transparent") + " state-error";
+  }
+
+  function makeEl(tagName, className, text) {
+    var element = document.createElement(tagName);
+    if (className) {
+      element.className = className;
+    }
+    element.textContent = text;
+    return element;
+  }
+
+  function setOptionalText(element, text) {
+    element.textContent = text || "";
+    if (text) {
+      element.classList.remove("hidden");
+    } else {
+      element.classList.add("hidden");
+    }
+  }
+
+  function plural(value, unit) {
+    return unit + (value === 1 ? "" : "s");
+  }
+</script>
+
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "ENUM",
+      "name": "variableType",
+      "label": "Variable Type",
+      "values": [
+        {"label": "Text / String", "value": "String"},
+        {"label": "Number", "value": "Number"}
+      ],
+      "default": "String"
+    },
+    {
+      "type": "VARIABLE",
+      "name": "targetStringVariable",
+      "label": "Text Variable",
+      "filters": {"type": "String"},
+      "showIf": ["variableType", "==", "String"]
+    },
+    {
+      "type": "VARIABLE",
+      "name": "targetNumberVariable",
+      "label": "Number Variable",
+      "filters": {"type": "Number"},
+      "showIf": ["variableType", "==", "Number"]
+    },
+    {
+      "type": "BOOLEAN",
+      "name": "showAdvanced",
+      "label": "Show Advanced Options",
+      "default": false
+    },
+    {
+      "type": "STRING",
+      "name": "title",
+      "label": "Custom Label",
+      "showIf": ["showAdvanced", "==", true]
+    },
+    {
+      "type": "ENUM",
+      "name": "timeFormat",
+      "label": "Time Format",
+      "values": [
+        {"label": "Friendly", "value": "friendly"},
+        {"label": "Precise", "value": "precise"},
+        {"label": "Precise + Detail", "value": "preciseDetail"}
+      ],
+      "default": "friendly",
+      "showIf": ["showAdvanced", "==", true]
+    },
+    {
+      "type": "BOOLEAN",
+      "name": "showTarget",
+      "label": "Show Target Time",
+      "default": true,
+      "showIf": ["showAdvanced", "==", true]
+    },
+    {
+      "type": "ENUM",
+      "name": "expiredBehavior",
+      "label": "After Target",
+      "values": [
+        {"label": "Show Complete Text", "value": "complete"},
+        {"label": "Count Up", "value": "countUp"}
+      ],
+      "default": "complete",
+      "showIf": ["showAdvanced", "==", true]
+    },
+    {
+      "type": "STRING",
+      "name": "finishText",
+      "label": "Complete Text",
+      "default": "Time's Up",
+      "showIf": [["showAdvanced", "==", true], ["expiredBehavior", "==", "complete"]]
+    },
+    {
+      "type": "NUMBER",
+      "name": "warningMinutes",
+      "label": "Warning Threshold Minutes",
+      "default": 10,
+      "showIf": ["showAdvanced", "==", true]
+    },
+    {
+      "type": "ENUM",
+      "name": "theme",
+      "label": "Theme",
+      "values": [
+        {"label": "Transparent", "value": "transparent"},
+        {"label": "Dark", "value": "dark"},
+        {"label": "Light", "value": "light"}
+      ],
+      "default": "transparent",
+      "showIf": ["showAdvanced", "==", true]
+    }
+  ],
+  "name": "Countdown Timer",
+  "dimensions": {"height": 1, "width": 1}
+}
+</script>
+<!-- Do not edit above -->

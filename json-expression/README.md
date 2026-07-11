@@ -2,10 +2,16 @@
 
 Display a value from a JSON variable directly on a SharpTools dashboard. You can select a nested property, read an item from an array, calculate a result, or format a date without first unpacking the JSON into separate variables in a Rule.
 
+## Import the tile
+
+[**Import the JSON Expression Custom Tile into SharpTools**](https://sharptools.io/developer/custom-tiles/import/?url=https://raw.githubusercontent.com/joshualyon/custom-tile-demos/refs/heads/main/json-expression/json-expression.html)
+
+The import link opens SharpTools and loads the latest version of the tile from this repository. Review the source, then save the imported tile to your account.
+
 ## Quick start
 
 1. Create or choose a SharpTools String variable containing valid JSON.
-2. Import `json-expression.html` as an HTML Custom Tile.
+2. Use the import link above, or manually import `json-expression.html` as an HTML Custom Tile.
 3. Select the JSON variable.
 4. Enter an expression for the value you want to display.
 5. Optionally add a label, units, number formatting, or custom colors.

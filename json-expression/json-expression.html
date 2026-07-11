@@ -1,0 +1,745 @@
+<script src="https://cdn.sharptools.io/js/custom-tiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjs@11.12.0/lib/browser/math.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/customParseFormat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/localizedFormat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/advancedFormat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/weekOfYear.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/isoWeek.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/relativeTime.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.14/plugin/duration.js"></script>
+
+<main class="tile" id="tile" aria-live="polite">
+  <div class="accent" aria-hidden="true"></div>
+  <div class="content" id="content">
+    <div class="label" id="label"></div>
+    <div class="value" id="value">&mdash;</div>
+    <div class="updated" id="updated"></div>
+  </div>
+  <div class="error" id="error" role="alert">
+    <div class="error-kicker">Expression error</div>
+    <div class="error-message" id="error-message"></div>
+  </div>
+</main>
+
+<script>
+  (function () {
+    var tileEl = document.getElementById('tile');
+    var contentEl = document.getElementById('content');
+    var labelEl = document.getElementById('label');
+    var valueEl = document.getElementById('value');
+    var updatedEl = document.getElementById('updated');
+    var errorEl = document.getElementById('error');
+    var errorMessageEl = document.getElementById('error-message');
+    var evaluationId = 0;
+
+    stio.ready(function (data) {
+      var settings = data.settings || {};
+      var variable = settings.variable;
+      var expressionSource = settings.expression || 'data';
+      var expressionMath;
+
+      applyAppearance(settings);
+
+      if (!variable) {
+        showError('Select a String variable in the tile settings.');
+        return;
+      }
+
+      if (!window.math || typeof window.math.create !== 'function') {
+        showError('The expression library could not be loaded.');
+        return;
+      }
+
+      try {
+        initializeBrowserDates();
+        expressionMath = createExpressionMath(window.math);
+      } catch (error) {
+        showError(describeError(error, 'The expression engine could not be initialized.'));
+        return;
+      }
+
+      renderVariableValue(variable.value, variable.timestamp, expressionSource, expressionMath, settings);
+      variable.onValue(function (value) {
+        renderVariableValue(value, variable.timestamp, expressionSource, expressionMath, settings);
+      });
+    });
+
+    function renderVariableValue(value, timestamp, expression, expressionMath, settings) {
+      var currentId = ++evaluationId;
+      var input;
+
+      try {
+        input = parseVariable(value);
+      } catch (error) {
+        showError('The selected variable does not contain valid JSON. ' + error.message);
+        return;
+      }
+
+      Promise.resolve().then(function () {
+        return expressionMath.evaluate(expression, {
+          value: typeof value === 'string' ? value : JSON.stringify(value),
+          data: input
+        });
+      }).then(function (result) {
+        if (currentId !== evaluationId) return;
+        showValue(formatResult(result, settings), result, timestamp, settings);
+      }).catch(function (error) {
+        if (currentId !== evaluationId) return;
+        showError(describeError(error, 'The expression could not be evaluated.'));
+      });
+    }
+
+    function parseVariable(value) {
+      if (typeof value === 'string') {
+        if (!value.trim()) throw new Error('The value is empty.');
+        return JSON.parse(value);
+      }
+
+      if (value !== null && typeof value === 'object') return value;
+      throw new Error('Expected a JSON object, array, or JSON-formatted string.');
+    }
+
+    function createExpressionMath(mathLibrary) {
+      var allowedTransformFactories = ['createMapTransform', 'createFilterTransform', 'createForEachTransform'];
+      var allowedBrowserTransforms = ['map', 'filter', 'forEach'];
+      var instance;
+
+      if (mathLibrary.all) {
+        var factories = {};
+        Object.keys(mathLibrary.all).filter(function (key) {
+          return !key.endsWith('Transform') || allowedTransformFactories.indexOf(key) >= 0;
+        }).forEach(function (key) {
+          factories[key] = mathLibrary.all[key];
+        });
+        instance = mathLibrary.create(factories, {matrix: 'Array'});
+      } else {
+        // The prebuilt browser bundle exposes a ready-made instance, but not the
+        // factory collection exported by the npm module. Repoint its expression
+        // transforms to the base functions to preserve the server's zero-based
+        // indexing while retaining the documented map/filter/forEach transforms.
+        instance = mathLibrary;
+        instance.config({matrix: 'Array'});
+        if (instance.expression && instance.expression.transform) {
+          Object.keys(instance.expression.transform).forEach(function (key) {
+            if (allowedBrowserTransforms.indexOf(key) < 0 && typeof instance[key] === 'function') {
+              instance.expression.transform[key] = instance[key];
+            }
+          });
+        }
+      }
+
+      var helpers = createSharpToolsHelpers();
+      Object.assign(helpers, createBrowserDateHelpers(window.dayjs));
+      instance.import(helpers, {override: true});
+
+      var limitedEvaluate = instance.evaluate;
+      instance.import({
+        'import': disabledFunction('import'),
+        'createUnit': disabledFunction('createUnit'),
+        'evaluate': disabledFunction('evaluate'),
+        'parse': disabledFunction('parse'),
+        'simplify': disabledFunction('simplify'),
+        'derivative': disabledFunction('derivative')
+      }, {override: true});
+
+      return {
+        evaluate: function (expression, scope) {
+          var result = limitedEvaluate(expression, scope || {});
+          if (result && result.constructor && result.constructor.name === 'ResultSet') {
+            result = result.entries.length ? result.entries[result.entries.length - 1] : '';
+          }
+          return toNative(result);
+        }
+      };
+    }
+
+    function disabledFunction(name) {
+      return function () {
+        throw new Error('Function ' + name + ' is disabled');
+      };
+    }
+
+    function initializeBrowserDates() {
+      var plugins = [
+        window.dayjs_plugin_customParseFormat,
+        window.dayjs_plugin_localizedFormat,
+        window.dayjs_plugin_advancedFormat,
+        window.dayjs_plugin_weekOfYear,
+        window.dayjs_plugin_isoWeek,
+        window.dayjs_plugin_relativeTime,
+        window.dayjs_plugin_duration
+      ];
+
+      if (typeof window.dayjs !== 'function' || plugins.some(function (plugin) {
+        return typeof plugin !== 'function';
+      })) {
+        throw new Error('The browser date library could not be loaded.');
+      }
+
+      plugins.forEach(function (plugin) {
+        window.dayjs.extend(plugin);
+      });
+    }
+
+    function createBrowserDateHelpers(dayjs) {
+      function add(base, value, units) {
+        return dayjs(base).add(value, units).valueOf();
+      }
+
+      function formatDate(input, format, locale) {
+        var date = dayjs(input);
+        if (locale && dayjs.Ls && dayjs.Ls[locale]) date = date.locale(locale);
+        return date.format(format);
+      }
+
+      function parseDate(input, format) {
+        return dayjs(input, format).valueOf();
+      }
+
+      function startOfDate(input, unit) {
+        return dayjs(input).startOf(unit || 'day').valueOf();
+      }
+
+      function endOfDate(input, unit) {
+        return dayjs(input).endOf(unit || 'day').valueOf();
+      }
+
+      function setDatePart(input, unit, value) {
+        return dayjs(input).set(unit, value).valueOf();
+      }
+
+      function getDatePart(input, unit) {
+        return dayjs(input).get(unit || 'day');
+      }
+
+      function isBetweenDates(startInput, endInput) {
+        var current = dayjs();
+        var start = dayjs(startInput);
+        var end = dayjs(endInput).endOf('day');
+        var crossesYear = start.month() > end.month();
+
+        start = start.year(current.year());
+        end = end.year(current.year());
+        if (crossesYear) {
+          if (current.valueOf() >= start.valueOf()) end = end.year(current.year() + 1);
+          else start = start.year(current.year() - 1);
+        }
+
+        return current.valueOf() >= start.valueOf() && current.valueOf() <= end.valueOf();
+      }
+
+      return {
+        now: function () { return dayjs().valueOf(); },
+        addDays: function (base, value) { return add(base, value, 'd'); },
+        addHours: function (base, value) { return add(base, value, 'h'); },
+        addMinutes: function (base, value) { return add(base, value, 'm'); },
+        addSeconds: function (base, value) { return add(base, value, 's'); },
+        addWeeks: function (base, value) { return add(base, value, 'w'); },
+        formatDate: formatDate,
+        formatDateTime: formatDate,
+        date: parseDate,
+        datetime: parseDate,
+        startOfDate: startOfDate,
+        endOfDate: endOfDate,
+        setDatePart: setDatePart,
+        getDatePart: getDatePart,
+        isBetweenDates: isBetweenDates,
+        humanizeDuration: function (input, showAdverbs) {
+          return dayjs.duration(input).humanize(showAdverbs || false);
+        },
+        durationAs: function (input, units) {
+          return dayjs.duration(input).as(units);
+        },
+        formatDuration: function (input, format) {
+          return dayjs.duration(input).format(format || 'DD HH:mm:ss.SSS');
+        }
+      };
+    }
+
+    function createSharpToolsHelpers() {
+      function indexOf(input, needle) {
+        input = toNative(input);
+        if (typeof input === 'string' || Array.isArray(input)) return input.indexOf(needle);
+        throw new Error('indexOf expects a string or array');
+      }
+
+      function lastIndexOf(input, needle) {
+        input = toNative(input);
+        if (typeof input === 'string' || Array.isArray(input)) return input.lastIndexOf(needle);
+        throw new Error('lastIndexOf expects a string or array');
+      }
+
+      function mid(input, start, length) {
+        if (input === null || typeof input === 'undefined') return input;
+        input = toNative(input);
+        if (length < 0) {
+          start += length;
+          length = Math.abs(length);
+        }
+        var end = length != null ? start + length : undefined;
+        if (start < 0 && end > 0) end = undefined;
+        if (typeof input === 'string' || Array.isArray(input)) return input.slice(start, end);
+        throw new Error('mid expects a string or array');
+      }
+
+      function join(input, joiner) {
+        input = toNative(input);
+        if (Array.isArray(input)) return input.join(joiner);
+        throw new Error('join expects an array');
+      }
+
+      function split(input, splitter) {
+        if (typeof input === 'string') return input.split(splitter);
+        throw new Error('split expects a string');
+      }
+
+      function trim(input) {
+        if (typeof input === 'string') return input.trim();
+        throw new Error('trim expects a string');
+      }
+
+      function trimLeft(input) {
+        if (typeof input === 'string') return input.replace(/^\s+/, '');
+        throw new Error('trimLeft expects a string');
+      }
+
+      function trimRight(input) {
+        if (typeof input === 'string') return input.replace(/\s+$/, '');
+        throw new Error('trimRight expects a string');
+      }
+
+      function changeCase(input, mode) {
+        if (typeof input !== 'string') throw new Error(mode + ' expects a string');
+        if (mode === 'upper') return input.toUpperCase();
+        if (mode === 'lower') return input.toLowerCase();
+        return input.toLowerCase().split(' ').map(function (word) {
+          return word.charAt(0).toUpperCase() + word.slice(1);
+        }).join(' ');
+      }
+
+      return {
+        urlEncode: function (input) { return encodeURIComponent(input); },
+        encodeURIComponent: function (input) { return encodeURIComponent(input); },
+        stringify: function (input) { return JSON.stringify(input, mathReplacer); },
+        parseJson: function (input) { return JSON.parse(input); },
+        join: join,
+        objectKeys: function (input) { return Object.keys(toNative(input)); },
+        objectValues: function (input) {
+          var object = toNative(input);
+          return Object.keys(object).map(function (key) { return object[key]; });
+        },
+        objectEntries: function (input) {
+          var object = toNative(input);
+          return Object.keys(object).map(function (key) { return [key, object[key]]; });
+        },
+        isEmpty: function (input) {
+          input = toNative(input);
+          if (input == null) return true;
+          if (typeof input === 'string') return input === '';
+          if (typeof input === 'number') return input === 0;
+          if (Array.isArray(input)) return input.length === 0;
+          if (typeof input === 'object') return Object.keys(input).length === 0;
+          return false;
+        },
+        split: split,
+        contains: function (input, needle) { return indexOf(input, needle) >= 0; },
+        indexOf: indexOf,
+        lastIndexOf: lastIndexOf,
+        startsWith: function (input, needle) { return indexOf(input, needle) === 0; },
+        endsWith: function (input, needle) {
+          input = toNative(input);
+          if (typeof input === 'string') return input.endsWith(needle);
+          if (Array.isArray(input)) return lastIndexOf(input, needle) === input.length - 1;
+          throw new Error('endsWith expects a string or array');
+        },
+        mid: mid,
+        substr: mid,
+        substring: function (input, start, end) {
+          if (typeof input === 'string') return input.substring(start, end);
+          throw new Error('substring expects a string');
+        },
+        left: function (input, length) { return mid(input, 0, length); },
+        right: function (input, length) { return mid(input, -length); },
+        trim: trim,
+        trimLeft: trimLeft,
+        ltrim: trimLeft,
+        trimRight: trimRight,
+        rtrim: trimRight,
+        replace: function (input, needle, replacement) {
+          if (typeof input !== 'string') throw new Error('replace expects a string');
+          return input.split(needle).join(replacement == null ? '' : replacement);
+        },
+        upper: function (input) { return changeCase(input, 'upper'); },
+        lower: function (input) { return changeCase(input, 'lower'); },
+        title: function (input) { return changeCase(input, 'title'); },
+        toFixed: function (input, digits) {
+          var number = Number(input);
+          if (!Number.isFinite(number)) throw new Error('toFixed requires numeric input');
+          return number.toFixed(digits);
+        }
+      };
+    }
+
+    function isMathType(input, types) {
+      if (!input || typeof input !== 'object') return false;
+      if (typeof types === 'string') types = [types];
+      return types.some(function (type) {
+        return (input.constructor && input.constructor.name === type) || input.mathjs === type;
+      });
+    }
+
+    function mathReplacer(key, input) {
+      if (typeof input === 'undefined') return null;
+      if (isMathType(input, ['DenseMatrix', 'SparseMatrix', 'BigNumber'])) {
+        if (input.data != null) return input.data;
+        if (input._data != null) return input._data;
+        if (input.entries != null) return input.entries;
+        if (input.value != null) return input.value;
+        return input.values != null ? input.values : '';
+      }
+      if (isMathType(input, 'Complex')) {
+        return input.re ? input.re + ' + ' + input.im + 'i' : input.im + 'i';
+      }
+      if (isMathType(input, 'Unit')) return input.value != null ? input.value : input.unit;
+      if (isMathType(input, 'Fraction')) return input.n && input.d ? input.n + '/' + input.d : '';
+      return input;
+    }
+
+    function toNative(input) {
+      return JSON.parse(JSON.stringify(input, mathReplacer));
+    }
+
+    function formatResult(result, settings) {
+      var format = settings.format || 'auto';
+      var emptyValue = settings.emptyValue || '\u2014';
+      var prefix = settings.prefix || '';
+      var suffix = settings.suffix || '';
+      var formatted;
+
+      if (typeof result === 'undefined' || result === null || result === '') {
+        return emptyValue;
+      }
+
+      if (format === 'json' || (format === 'auto' && typeof result === 'object')) {
+        formatted = JSON.stringify(result, null, 2);
+      } else if (format === 'number' || (format === 'auto' && typeof result === 'number')) {
+        var numericResult = Number(result);
+        if (!Number.isFinite(numericResult)) {
+          throw new Error('The expression result is not a number.');
+        }
+        if (format === 'number') {
+          var decimals = Number(settings.decimalPlaces);
+          if (!Number.isFinite(decimals)) decimals = 1;
+          decimals = Math.max(0, Math.min(10, Math.round(decimals)));
+          formatted = new Intl.NumberFormat(undefined, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+          }).format(numericResult);
+        } else {
+          formatted = new Intl.NumberFormat(undefined, {
+            maximumFractionDigits: 3
+          }).format(numericResult);
+        }
+      } else if (typeof result === 'boolean') {
+        formatted = result ? 'True' : 'False';
+      } else {
+        formatted = String(result);
+      }
+
+      return prefix + formatted + suffix;
+    }
+
+    function showValue(formatted, rawResult, timestamp, settings) {
+      var isStructured = rawResult !== null && typeof rawResult === 'object';
+      var length = formatted.length;
+
+      errorEl.classList.remove('visible');
+      contentEl.classList.remove('hidden');
+      valueEl.className = 'value';
+      if (isStructured) valueEl.classList.add('structured');
+      else if (length > 40) valueEl.classList.add('dense');
+      else if (length > 16) valueEl.classList.add('compact');
+
+      valueEl.textContent = formatted;
+      updatedEl.textContent = settings.showUpdated === false ? '' : formatTimestamp(timestamp);
+
+      tileEl.classList.remove('changed');
+      void tileEl.offsetWidth;
+      tileEl.classList.add('changed');
+    }
+
+    function showError(message) {
+      console.error('JSON Expression Tile:', message);
+      contentEl.classList.add('hidden');
+      errorMessageEl.textContent = message;
+      errorEl.classList.add('visible');
+    }
+
+    function describeError(error, fallback) {
+      if (!error) return fallback;
+      var message = error.message || fallback;
+      return error.char ? message + ' (character ' + error.char + ')' : message;
+    }
+
+    function applyAppearance(settings) {
+      var label = settings.label;
+      labelEl.textContent = label || '';
+      labelEl.style.display = label ? '' : 'none';
+      tileEl.style.setProperty('--tile-accent', validColor(settings.accentColor, '#54d6c1'));
+      tileEl.style.setProperty('--tile-text', validColor(settings.textColor, '#ffffff'));
+    }
+
+    function validColor(value, fallback) {
+      if (!value || !window.CSS || !CSS.supports('color', value)) return fallback;
+      return value;
+    }
+
+    function formatTimestamp(timestamp) {
+      if (!timestamp) return '';
+      var date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return '';
+      return 'Updated ' + new Intl.DateTimeFormat(undefined, {
+        hour: 'numeric',
+        minute: '2-digit'
+      }).format(date);
+    }
+  }());
+</script>
+
+<style>
+  :root {
+    color-scheme: dark;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: transparent;
+  }
+
+  * { box-sizing: border-box; }
+
+  .tile {
+    --tile-accent: #54d6c1;
+    --tile-text: #ffffff;
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(14px, 6vmin, 32px);
+    color: var(--tile-text);
+  }
+
+  .accent {
+    position: absolute;
+    top: clamp(10px, 4vmin, 20px);
+    left: clamp(12px, 5vmin, 24px);
+    width: clamp(20px, 10vmin, 48px);
+    height: 3px;
+    border-radius: 999px;
+    background: var(--tile-accent);
+    opacity: 0.9;
+    transform-origin: left center;
+  }
+
+  .content {
+    width: 100%;
+    text-align: center;
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+
+  .content.hidden {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px);
+  }
+
+  .label {
+    margin-bottom: clamp(4px, 2vmin, 10px);
+    color: var(--tile-text);
+    font-size: clamp(0.68rem, 4.4vmin, 0.92rem);
+    font-weight: 650;
+    letter-spacing: 0.13em;
+    line-height: 1.2;
+    opacity: 0.64;
+    text-transform: uppercase;
+  }
+
+  .value {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-size: clamp(1.8rem, 18vmin, 5.8rem);
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    letter-spacing: -0.055em;
+    line-height: 0.98;
+    text-wrap: balance;
+  }
+
+  .value.compact {
+    font-size: clamp(1.25rem, 11vmin, 3.25rem);
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+  }
+
+  .value.dense {
+    font-size: clamp(0.92rem, 7vmin, 1.8rem);
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+  }
+
+  .value.structured {
+    max-height: 65vh;
+    overflow: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: clamp(0.72rem, 5vmin, 1.15rem);
+    font-weight: 500;
+    letter-spacing: 0;
+    line-height: 1.35;
+    text-align: left;
+    white-space: pre-wrap;
+  }
+
+  .updated {
+    min-height: 1em;
+    margin-top: clamp(6px, 3vmin, 14px);
+    color: var(--tile-text);
+    font-size: clamp(0.62rem, 3.7vmin, 0.78rem);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    opacity: 0.42;
+  }
+
+  .error {
+    display: none;
+    width: 100%;
+    color: var(--tile-text);
+    text-align: left;
+  }
+
+  .error.visible { display: block; }
+
+  .error-kicker {
+    margin-bottom: 8px;
+    color: #ff998f;
+    font-size: clamp(0.7rem, 4vmin, 0.84rem);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .error-message {
+    font-size: clamp(0.9rem, 6vmin, 1.25rem);
+    line-height: 1.35;
+  }
+
+  .tile.changed .value { animation: value-in 300ms ease-out; }
+  .tile.changed .accent { animation: accent-in 420ms ease-out; }
+
+  @keyframes value-in {
+    from { opacity: 0.45; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes accent-in {
+    0% { opacity: 0.35; transform: scaleX(0.55); }
+    100% { opacity: 0.9; transform: scaleX(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .content { transition: none; }
+    .tile.changed .value,
+    .tile.changed .accent { animation: none; }
+  }
+</style>
+
+<!-- Do not edit below -->
+<script type="application/json" id="tile-settings">
+{
+  "schema": "0.2.0",
+  "settings": [
+    {
+      "type": "VARIABLE",
+      "name": "variable",
+      "label": "JSON Variable",
+      "filters": {"type": "String"}
+    },
+    {
+      "type": "STRING",
+      "name": "expression",
+      "label": "Rule Expression",
+      "default": "data"
+    },
+    {
+      "type": "STRING",
+      "name": "label",
+      "label": "Label",
+      "default": "JSON Value"
+    },
+    {
+      "type": "ENUM",
+      "name": "format",
+      "label": "Display Format",
+      "values": [
+        {"label": "Automatic", "value": "auto"},
+        {"label": "Text", "value": "text"},
+        {"label": "Number", "value": "number"},
+        {"label": "JSON", "value": "json"}
+      ],
+      "default": "auto"
+    },
+    {
+      "type": "NUMBER",
+      "name": "decimalPlaces",
+      "label": "Decimal Places",
+      "default": 1,
+      "showIf": ["format", "==", "number"]
+    },
+    {
+      "type": "STRING",
+      "name": "prefix",
+      "label": "Value Prefix"
+    },
+    {
+      "type": "STRING",
+      "name": "suffix",
+      "label": "Value Suffix"
+    },
+    {
+      "type": "STRING",
+      "name": "emptyValue",
+      "label": "Empty Result Text",
+      "default": "—"
+    },
+    {
+      "type": "BOOLEAN",
+      "name": "showUpdated",
+      "label": "Show Last Updated",
+      "default": true
+    },
+    {
+      "type": "STRING",
+      "name": "textColor",
+      "label": "Text Color",
+      "default": "#ffffff"
+    },
+    {
+      "type": "STRING",
+      "name": "accentColor",
+      "label": "Accent Color",
+      "default": "#54d6c1"
+    }
+  ],
+  "name": "JSON Expression"
+}
+</script>
+<!-- Do not edit above -->

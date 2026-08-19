@@ -2390,17 +2390,17 @@
         //See: https://meteocons.com/docs/cdn/
         var name = METEO_CODE_TO_NAME[code] || code; //in case the raw icon name is passed in
         if(!iconStyle) iconStyle = 'line'
-        
+
         // The Original GitHub Pages release was removed
         // return 'https://basmilius.github.io/weather-icons/production/' + iconStyle + '/all/' + name + '.svg'
-        
-        // New version 3.x preview is hosted on meteocons.com but it's intended as documentation and 
+
+        // New version 3.x preview is hosted on meteocons.com but it's intended as documentation and
         // is not necessarily a stable URL
-        // return 'https://meteocons.com/icons/' + iconStyle + '/' + name + '.svg' 
-        
+        // return 'https://meteocons.com/icons/' + iconStyle + '/' + name + '.svg'
+
         // The icon designer, Bas, is working on a CDN but the preview versions are only good for 90 days
         // so we are waiting on the 3.x release or 2.x backfill before switching to this approach
-        // const METEOCON_VERSION = '3.0.0-next.10' 
+        // const METEOCON_VERSION = '3.0.0-next.10'
         // return `https://cdn.meteocons.com/${METEOCON_VERSION}/svg/${iconStyle}/${name}.svg`
 
         // Alternatively, we could use unpkg or jsdelivr which source from npm and should be immutable

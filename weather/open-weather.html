@@ -1,11 +1,21 @@
 <script>
   /*
-    VERSION: 2026-04-15
+    VERSION: 2026-08-19
 
     Multi-provider weather tile supporting:
     - Open-Meteo (no API key required - default)
     - OpenWeatherMap 2.5 Multi-endpoint
     - OpenWeatherMap 3.0 OneCall
+    - OpenWeatherMap 4.0 OneCall
+
+    OpenWeather API usage per tile refresh:
+    - 2.5 Multi: 2 OpenWeather requests, plus 1 Open-Meteo request
+    - 3.0 OneCall: 1 OpenWeather request
+    - 4.0 OneCall: 2 OpenWeather requests (current + daily forecast)
+    - Showing AQI adds 1 request to the selected provider per refresh
+
+    Each visible tile instance refreshes independently. At the default 3-hour
+    interval, OneCall 4.0 uses 16 weather requests per tile per day.
 
     The API Key, Latitude, and Longitude are now set in the Tile Settings
     when you edit an individual tile.
@@ -53,7 +63,8 @@
       "values": [
         {"label": "Open-Meteo (No API Key)", "value": "openmeteo"},
         {"label": "OpenWeather 2.5 Multi", "value": "2-5multi"},
-        {"label": "OpenWeather 3.0 OneCall", "value": "3-0onecall"}
+        {"label": "OpenWeather 3.0 OneCall", "value": "3-0onecall"},
+        {"label": "OpenWeather 4.0 OneCall", "value": "4-0onecall"}
       ],
       "name": "apiPreference",
       "default": "openmeteo",
@@ -144,6 +155,23 @@
       "label": "Refresh Interval (minutes)",
       "default": 180,
       "name": "refreshInterval"
+    },
+    {
+      "type": "LABEL",
+      "name": "oneCall4ApiUsageLabel",
+      "label": "One Call 4.0 API Usage",
+      "value": "One Call 4.0 uses 2 API calls per tile refresh. [More details](https://community.sharptools.io/t/weather-tile-open-weather-current-and-forecast/9237#api-preference)",
+      "showIf": ["apiPreference", "==", "4-0onecall"]
+    },
+    {
+      "type": "LABEL",
+      "name": "openWeatherAqiApiUsageLabel",
+      "label": "AQI API Usage",
+      "value": "Showing AQI adds 1 OpenWeather API call per refresh for each tile.",
+      "showIf": [
+        ["showAqi", "==", true],
+        ["apiPreference", "!=", "openmeteo"]
+      ]
     }
   ],
   "name": "Weather Tile",
@@ -773,6 +801,29 @@
   }
 
   function isNullOrEmpty(v){ return v == null || v === "" };
+
+  function getWeatherErrorMessage(error, apiPreference) {
+    var response = error && error.response;
+    var status = response && response.status;
+    var responseData = response && response.data;
+    var apiMessage = responseData && typeof responseData.message === 'string' ? responseData.message : '';
+    var normalizedMessage = apiMessage.toLowerCase();
+
+    if (apiPreference === '4-0onecall' && status === 401 &&
+        normalizedMessage.indexOf('separate subscription') !== -1) {
+      return 'OpenWeather One Call 4.0 requires a separate One Call by Call subscription. Enable it in your OpenWeather Billing Plans.';
+    }
+
+    if (status === 401 && normalizedMessage.indexOf('invalid api key') !== -1) {
+      return 'OpenWeather rejected the API key. Check the API key in this tile\'s settings.';
+    }
+
+    if (status === 429) {
+      return 'OpenWeather API request limit reached. Check your OpenWeather usage and billing limits.';
+    }
+
+    return 'Failed to fetch weather data. Please check your settings.';
+  }
 
   // Chart.js lazy loading for ES2022+ browsers only
   // Chart.js 4.x uses ES2022 class fields which aren't supported in older browsers (Safari < 14.1)
@@ -1823,6 +1874,59 @@
   }
 
   /**
+   * Create an OpenWeatherMap 4.0 OneCall provider
+   * Uses separate current and daily timeline endpoints, then normalizes them
+   * to the same structure used by the other weather providers.
+   */
+  function createOWMOneCall4Provider(config) {
+    var BASE_URL = 'https://api.openweathermap.org/data/4.0';
+
+    function buildParams() {
+      var params = '?lat=' + config.lat + '&lon=' + config.lon + '&appid=' + config.apiKey + '&units=' + config.units;
+      if (config.lang) {
+        params += '&lang=' + config.lang;
+      }
+      return params;
+    }
+
+    // Reuse the 3.0 provider's AQI and reverse-geocoding methods. Those use
+    // OpenWeather's separate 2.5 Air Pollution and 1.0 Geocoding APIs.
+    var provider = createOWMOneCallProvider(config);
+
+    provider.fetchWeather = function() {
+      var currentUrl = BASE_URL + '/onecall/current' + buildParams();
+      var dailyUrl = BASE_URL + '/onecall/timeline/1day' + buildParams();
+
+      return Promise.all([axios.get(currentUrl), axios.get(dailyUrl)]).then(function(responses) {
+        var currentResponse = responses[0].data;
+        var dailyResponse = responses[1].data;
+        var current = currentResponse && Array.isArray(currentResponse.data) ? currentResponse.data[0] : null;
+        var daily = dailyResponse && Array.isArray(dailyResponse.data) ? dailyResponse.data : [];
+
+        if (!current) {
+          throw new Error('OpenWeather 4.0 did not return current weather data');
+        }
+        if (daily.length === 0) {
+          throw new Error('OpenWeather 4.0 did not return daily forecast data');
+        }
+
+        // Match the normalized provider shape used by the current conditions UI.
+        if (daily[0].temp) {
+          current.temp_max = daily[0].temp.max;
+          current.temp_min = daily[0].temp.min;
+        }
+
+        return {
+          current: current,
+          daily: daily
+        };
+      });
+    };
+
+    return provider;
+  }
+
+  /**
    * Factory function to get the appropriate weather provider
    */
   function getWeatherProvider(apiPreference, config) {
@@ -1833,6 +1937,8 @@
         return createOWMMultiProvider(config);
       case '3-0onecall':
         return createOWMOneCallProvider(config);
+      case '4-0onecall':
+        return createOWMOneCall4Provider(config);
       default:
         console.warn('Unknown API preference: ' + apiPreference + ', falling back to Open-Meteo');
         return createOpenMeteoProvider(config);
@@ -1987,7 +2093,7 @@
             vm.error = null;
           } else {
             console.error('Failed to fetch weather:', results[0].reason);
-            vm.error = 'Failed to fetch weather data. Please check your settings.';
+            vm.error = getWeatherErrorMessage(results[0].reason, vm.apiPreference);
           }
 
           // AQI data (optional)
@@ -2002,7 +2108,7 @@
           }
         }).catch(function(err) {
           console.error('Error refreshing weather:', err);
-          vm.error = 'An error occurred while fetching weather data.';
+          vm.error = getWeatherErrorMessage(err, vm.apiPreference);
         });
       },
 

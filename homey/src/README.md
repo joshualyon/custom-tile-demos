@@ -1,6 +1,12 @@
 # Custom Tiles
 By popular community request, we’ve started putting together a few Custom Tiles for Homey. These are still very much beta and have not been tested thoroughly or over an extended period of time.
 
+## Homey sign-in token binding (November 2026)
+
+Google Gauge and Image Display now pin `homey-api` 3.21.0 in both the source and import HTML. In Homey Ink mode, the existing `homey.authenticate()` call now requests a delegation token bound to the selected Homey. Existing OAuth links do not need to be relinked for this migration. The API Key mode and the direct-HTTP Flows tile do not use delegation tokens; the Homey Ink workaround remains unofficial and unsupported.
+
+Update your saved tile HTML to receive this fix. For an imported tile, open it in the SharpTools Custom Tile developer tools, choose **Update from Source** from the editor's gear menu, then save with **Update**. Alternatively, replace its HTML or reimport the updated tile from `/homey/`. A repository update does not automatically update copies already saved in your account.
+
 ## Source vs Compiled
 You are currently in the `/homey/src` folder which includes the raw source code for each of the Custom Tiles. 
 
